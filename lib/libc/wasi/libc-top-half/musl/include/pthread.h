@@ -79,9 +79,7 @@ extern "C" {
 
 int pthread_create(pthread_t *__restrict, const pthread_attr_t *__restrict, void *(*)(void *), void *__restrict);
 int pthread_detach(pthread_t);
-#ifdef __wasilibc_unmodified_upstream
 _Noreturn void pthread_exit(void *);
-#endif
 int pthread_join(pthread_t, void **);
 
 #ifdef __GNUC__
@@ -227,7 +225,6 @@ int pthread_getaffinity_np(pthread_t, size_t, struct cpu_set_t *);
 int pthread_setaffinity_np(pthread_t, size_t, const struct cpu_set_t *);
 int pthread_getattr_np(pthread_t, pthread_attr_t *);
 int pthread_setname_np(pthread_t, const char *);
-int pthread_getname_np(pthread_t, char *, size_t);
 int pthread_getattr_default_np(pthread_attr_t *);
 int pthread_setattr_default_np(const pthread_attr_t *);
 int pthread_tryjoin_np(pthread_t, void **);

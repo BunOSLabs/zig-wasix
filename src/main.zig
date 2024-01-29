@@ -949,7 +949,6 @@ fn buildOutputType(
 
         .system_libs = .{},
         .resolved_system_libs = .{},
-        .wasi_emulated_libs = .{},
 
         .c_source_files = .{},
         .rc_source_files = .{},
@@ -3166,7 +3165,6 @@ fn buildOutputType(
         .frameworks = resolved_frameworks.items,
         .system_lib_names = create_module.resolved_system_libs.items(.name),
         .system_lib_infos = create_module.resolved_system_libs.items(.lib),
-        .wasi_emulated_libs = create_module.wasi_emulated_libs.items,
         .want_compiler_rt = want_compiler_rt,
         .hash_style = hash_style,
         .linker_script = linker_script,
@@ -3426,7 +3424,6 @@ const CreateModule = struct {
         name: []const u8,
         lib: Compilation.SystemLib,
     }),
-    wasi_emulated_libs: std.ArrayListUnmanaged(wasi_libc.CRTFile),
 
     c_source_files: std.ArrayListUnmanaged(Compilation.CSourceFile),
     rc_source_files: std.ArrayListUnmanaged(Compilation.RcSourceFile),
@@ -3599,13 +3596,6 @@ fn createModule(
 
             if (fs.path.isAbsolute(lib_name)) {
                 fatal("cannot use absolute path as a system library: {s}", .{lib_name});
-            }
-
-            if (target.os.tag == .wasi) {
-                if (wasi_libc.getEmulatedLibCRTFile(lib_name)) |crt_file| {
-                    try create_module.wasi_emulated_libs.append(arena, crt_file);
-                    continue;
-                }
             }
 
             try external_system_libs.append(arena, .{

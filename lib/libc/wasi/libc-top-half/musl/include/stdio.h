@@ -28,9 +28,7 @@ extern "C" {
 #include <bits/alltypes.h>
 
 #ifdef __wasilibc_unmodified_upstream /* Use the compiler's definition of NULL */
-#if __cplusplus >= 201103L
-#define NULL nullptr
-#elif defined(__cplusplus)
+#ifdef __cplusplus
 #define NULL 0L
 #else
 #define NULL ((void*)0)
@@ -159,10 +157,8 @@ FILE *tmpfile(void) __attribute__((__deprecated__("tmpfile is not defined on WAS
 FILE *fmemopen(void *__restrict, size_t, const char *__restrict);
 FILE *open_memstream(char **, size_t *);
 FILE *fdopen(int, const char *);
-#ifdef __wasilibc_unmodified_upstream /* WASI has no popen */
 FILE *popen(const char *, const char *);
 int pclose(FILE *);
-#endif
 int fileno(FILE *);
 int fseeko(FILE *, off_t, int);
 off_t ftello(FILE *);

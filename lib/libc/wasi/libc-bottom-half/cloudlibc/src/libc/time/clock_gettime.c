@@ -11,7 +11,7 @@
 
 int __clock_gettime(clockid_t clock_id, struct timespec *tp) {
   __wasi_timestamp_t ts;
-  __wasi_errno_t error = __wasi_clock_time_get(clock_id->id, 1, &ts);
+  __wasi_errno_t error = __wasi_clock_time_get(clock_id, 1, &ts);
   if (error != 0) {
     errno = error;
     return -1;
@@ -19,4 +19,4 @@ int __clock_gettime(clockid_t clock_id, struct timespec *tp) {
   *tp = timestamp_to_timespec(ts);
   return 0;
 }
-weak_alias(__clock_gettime, clock_gettime);
+extern __typeof(__clock_gettime) clock_gettime __attribute__((__weak__, alias("__clock_gettime")));

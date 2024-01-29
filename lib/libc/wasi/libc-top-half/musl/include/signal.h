@@ -1,7 +1,3 @@
-#ifndef _WASI_EMULATED_SIGNAL
-#error "wasm lacks signal support; to enable minimal signal emulation, \
-compile with -D_WASI_EMULATED_SIGNAL and link with -lwasi-emulated-signal"
-#else
 #ifndef _SIGNAL_H
 #define _SIGNAL_H
 
@@ -15,7 +11,6 @@ extern "C" {
  || defined(_XOPEN_SOURCE) || defined(_GNU_SOURCE) \
  || defined(_BSD_SOURCE)
 
-#ifdef __wasilibc_unmodified_upstream /* WASI has no ucontext support */
 #ifdef _GNU_SOURCE
 #define __ucontext ucontext
 #endif
@@ -47,7 +42,6 @@ extern "C" {
 #define SI_KERNEL 128
 
 typedef struct sigaltstack stack_t;
-#endif
 
 #endif
 
@@ -57,7 +51,6 @@ typedef struct sigaltstack stack_t;
  || defined(_XOPEN_SOURCE) || defined(_GNU_SOURCE) \
  || defined(_BSD_SOURCE)
 
-#ifdef __wasilibc_unmodified_upstream /* WASI has no sigaction */
 #define SIG_HOLD ((void (*)(int)) 2)
 
 #define FPE_INTDIV 1
@@ -82,8 +75,6 @@ typedef struct sigaltstack stack_t;
 #define SEGV_ACCERR 2
 #define SEGV_BNDERR 3
 #define SEGV_PKUERR 4
-#define SEGV_MTEAERR 8
-#define SEGV_MTESERR 9
 
 #define BUS_ADRALN 1
 #define BUS_ADRERR 2
@@ -185,9 +176,6 @@ struct sigaction {
 #define sa_handler   __sa_handler.sa_handler
 #define sa_sigaction __sa_handler.sa_sigaction
 
-#define SA_UNSUPPORTED 0x00000400
-#define SA_EXPOSE_TAGBITS 0x00000800
-
 struct sigevent {
 	union sigval sigev_value;
 	int sigev_signo;
@@ -210,7 +198,6 @@ struct sigevent {
 #define SIGEV_NONE 1
 #define SIGEV_THREAD 2
 #define SIGEV_THREAD_ID 4
-#endif
 
 #ifdef __wasilibc_unmodified_upstream /* WASI has no realtime signals */
 int __libc_current_sigrtmin(void);
@@ -220,7 +207,6 @@ int __libc_current_sigrtmax(void);
 #define SIGRTMAX  (__libc_current_sigrtmax())
 #endif
 
-#ifdef __wasilibc_unmodified_upstream /* WASI has no signals */
 int kill(pid_t, int);
 
 int sigemptyset(sigset_t *);
@@ -237,12 +223,9 @@ int sigwait(const sigset_t *__restrict, int *__restrict);
 int sigwaitinfo(const sigset_t *__restrict, siginfo_t *__restrict);
 int sigtimedwait(const sigset_t *__restrict, siginfo_t *__restrict, const struct timespec *__restrict);
 int sigqueue(pid_t, int, union sigval);
-#endif
 
-#ifdef __wasilibc_unmodified_upstream /* WASI has no threads yet */
 int pthread_sigmask(int, const sigset_t *__restrict, sigset_t *__restrict);
 int pthread_kill(pthread_t, int);
-#endif
 
 #ifdef __wasilibc_unmodified_upstream /* WASI has no siginfo */
 void psiginfo(const siginfo_t *, const char *);
@@ -251,9 +234,11 @@ void psignal(int, const char *);
 
 #endif
 
-#ifdef __wasilibc_unmodified_upstream /* WASI has no signals */
 #if defined(_XOPEN_SOURCE) || defined(_BSD_SOURCE) || defined(_GNU_SOURCE)
 int killpg(pid_t, int);
+#endif
+#ifdef __wasilibc_unmodified_upstream /* WASI has no signals */
+#if defined(_XOPEN_SOURCE) || defined(_BSD_SOURCE) || defined(_GNU_SOURCE)
 int sigaltstack(const stack_t *__restrict, stack_t *__restrict);
 int sighold(int);
 int sigignore(int);
@@ -282,9 +267,6 @@ void (*sigset(int, void (*)(int)))(int);
 #if defined(_BSD_SOURCE) || defined(_GNU_SOURCE)
 #define NSIG _NSIG
 typedef void (*sig_t)(int);
-
-#define SYS_SECCOMP 1
-#define SYS_USER_DISPATCH 2
 #endif
 
 #ifdef _GNU_SOURCE
@@ -335,5 +317,4 @@ __REDIR(sigtimedwait, __sigtimedwait_time64);
 }
 #endif
 
-#endif
 #endif

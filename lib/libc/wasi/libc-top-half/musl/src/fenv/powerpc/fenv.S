@@ -1,4 +1,4 @@
-#if !defined(_SOFT_FLOAT) && !defined(__NO_FPRS__)
+#ifndef _SOFT_FLOAT
 .global feclearexcept
 .type feclearexcept,@function
 feclearexcept:

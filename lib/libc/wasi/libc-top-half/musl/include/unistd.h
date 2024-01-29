@@ -15,16 +15,12 @@ extern "C" {
 #define SEEK_SET 0
 #define SEEK_CUR 1
 #define SEEK_END 2
-#define SEEK_DATA 3
-#define SEEK_HOLE 4
 #else
 #include <__header_unistd.h>
 #endif
 
 #ifdef __wasilibc_unmodified_upstream /* Use the compiler's definition of NULL */
-#if __cplusplus >= 201103L
-#define NULL nullptr
-#elif defined(__cplusplus)
+#ifdef __cplusplus
 #define NULL 0L
 #else
 #define NULL ((void*)0)
@@ -45,17 +41,17 @@ extern "C" {
 
 #include <bits/alltypes.h>
 
-#ifdef __wasilibc_unmodified_upstream /* WASI has no pipe */
 int pipe(int [2]);
 int pipe2(int [2], int);
-#endif
 int close(int);
 int posix_close(int, int);
-#ifdef __wasilibc_unmodified_upstream /* WASI has no dup */
+
+#define BADEXIT -1
+
 int dup(int);
 int dup2(int, int);
 int dup3(int, int, int);
-#endif
+
 off_t lseek(int, off_t, int);
 #ifdef __wasilibc_unmodified_upstream /* Optimize the readonly case of lseek */
 #else
@@ -128,17 +124,15 @@ int fchdir(int);
 int chdir(const char *);
 char *getcwd(char *, size_t);
 
-#ifdef __wasilibc_unmodified_upstream /* WASI has no signals */
 unsigned alarm(unsigned);
-#endif
 unsigned sleep(unsigned);
 #ifdef __wasilibc_unmodified_upstream /* WASI has no pause */
 int pause(void);
 #endif
 
-#ifdef __wasilibc_unmodified_upstream /* WASI has no fork/exec */
 pid_t fork(void);
-pid_t _Fork(void);
+pid_t _fork_internal(int copy_mem);
+pid_t _Fork(int copy_mem);
 int execve(const char *, char *const [], char *const []);
 int execv(const char *, char *const []);
 int execle(const char *, const char *, ...);
@@ -146,48 +140,33 @@ int execl(const char *, const char *, ...);
 int execvp(const char *, char *const []);
 int execlp(const char *, const char *, ...);
 int fexecve(int, char *const [], char *const []);
-#endif
 _Noreturn void _exit(int);
 
-#if defined(__wasilibc_unmodified_upstream) || defined(_WASI_EMULATED_GETPID)
 pid_t getpid(void);
-#else
-__attribute__((__deprecated__(
-"WASI lacks process identifiers; to enable emulation of the `getpid` function using "
-"a placeholder value, which doesn't reflect the host PID of the program, "
-"compile with -D_WASI_EMULATED_GETPID and link with -lwasi-emulated-getpid"
-)))
-pid_t getpid(void);
-#endif
-#ifdef __wasilibc_unmodified_upstream /* WASI has no getpid etc. */
 pid_t getppid(void);
 pid_t getpgrp(void);
 pid_t getpgid(pid_t);
 int setpgid(pid_t, pid_t);
 pid_t setsid(void);
 pid_t getsid(pid_t);
-#endif
-#ifdef __wasilibc_unmodified_upstream /* WASI has no ttyname */
 char *ttyname(int);
 int ttyname_r(int, char *, size_t);
-#endif
 int isatty(int);
-#ifdef __wasilibc_unmodified_upstream /* WASI has no process groups */
 pid_t tcgetpgrp(int);
 int tcsetpgrp(int, pid_t);
-#endif
 
 #ifdef __wasilibc_unmodified_upstream /* WASI has no getuid etc. */
+int getgroups(int, gid_t []);
+#endif
+
 uid_t getuid(void);
 uid_t geteuid(void);
 gid_t getgid(void);
 gid_t getegid(void);
-int getgroups(int, gid_t []);
 int setuid(uid_t);
 int seteuid(uid_t);
 int setgid(gid_t);
 int setegid(gid_t);
-#endif
 
 char *getlogin(void);
 int getlogin_r(char *, size_t);
@@ -216,11 +195,11 @@ int setregid(gid_t, gid_t);
 int lockf(int, int, off_t);
 #endif
 long gethostid(void);
-#ifdef __wasilibc_unmodified_upstream /* WASI has no nice, sync, or setpgrp */
+#ifdef __wasilibc_unmodified_upstream /* WASI has no nice or sync */
 int nice(int);
 void sync(void);
-pid_t setpgrp(void);
 #endif
+pid_t setpgrp(void);
 char *crypt(const char *, const char *);
 void encrypt(char *, int);
 void swab(const void *__restrict, void *__restrict, ssize_t);
@@ -240,8 +219,8 @@ unsigned ualarm(unsigned, unsigned);
 int brk(void *);
 #endif
 void *sbrk(intptr_t);
-#ifdef __wasilibc_unmodified_upstream /* WASI has no processes */
 pid_t vfork(void);
+#ifdef __wasilibc_unmodified_upstream /* WASI has no processes */
 int vhangup(void);
 int chroot(const char *);
 #endif
@@ -265,6 +244,7 @@ int issetugid(void);
 int getentropy(void *, size_t);
 extern int optreset;
 #endif
+int getpagesize(void);
 
 #ifdef _GNU_SOURCE
 extern char **environ;

@@ -7,6 +7,8 @@
 #include <wasi/api.h>
 #include <errno.h>
 #include <stdarg.h>
+#include <memory.h>
+#include <termios.h>
 
 int ioctl(int fildes, int request, ...) {
   switch (request) {
@@ -17,13 +19,9 @@ int ioctl(int fildes, int request, ...) {
               .u.tag = __WASI_EVENTTYPE_FD_READ,
               .u.u.fd_read.file_descriptor = fildes,
           },
-          {
-              .u.tag = __WASI_EVENTTYPE_CLOCK,
-              .u.u.clock.id = __WASI_CLOCKID_MONOTONIC,
-          },
       };
       __wasi_event_t events[__arraycount(subscriptions)];
-      size_t nevents;
+      __wasi_size_t nevents;
       __wasi_errno_t error = __wasi_poll_oneoff(
           subscriptions, events, __arraycount(subscriptions), &nevents);
       if (error != 0) {
@@ -78,6 +76,26 @@ int ioctl(int fildes, int request, ...) {
         errno = error;
         return -1;
       }
+      return 0;
+    }
+    case TIOCGWINSZ: {
+      va_list ap;
+      va_start(ap, request);
+      struct winsize *wsz = va_arg(ap, struct winsize *);
+      va_end(ap);
+
+      __wasi_tty_t tty;
+      int r = __wasi_tty_get(&tty);
+      if (r != 0) {
+        errno = r;
+        return -1;
+      }
+
+      memset(wsz, 0, sizeof(struct winsize));
+      wsz->ws_col = tty.cols;
+      wsz->ws_row = tty.rows;
+      wsz->ws_xpixel = tty.width;
+      wsz->ws_ypixel = tty.height;
       return 0;
     }
     default:

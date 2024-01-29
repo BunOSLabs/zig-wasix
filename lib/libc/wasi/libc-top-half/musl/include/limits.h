@@ -78,9 +78,7 @@
 #ifdef __wasilibc_unmodified_upstream /* WASI has no mq */
 #define MQ_PRIO_MAX 32768
 #endif
-#ifdef __wasilibc_unmodified_upstream /* WASI has no usernames */
 #define LOGIN_NAME_MAX 256
-#endif
 
 /* Arbitrary numbers... */
 

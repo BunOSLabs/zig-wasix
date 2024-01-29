@@ -8,9 +8,7 @@ extern "C" {
 #include <features.h>
 
 #ifdef __wasilibc_unmodified_upstream /* Use the compiler's definition of NULL */
-#if __cplusplus >= 201103L
-#define NULL nullptr
-#elif defined(__cplusplus)
+#ifdef __cplusplus
 #define NULL 0L
 #else
 #define NULL ((void*)0)
@@ -60,6 +58,8 @@ struct tm {
 #include <__header_time.h>
 #endif
 
+typedef int clockid_t;
+
 #if defined(__wasilibc_unmodified_upstream) || defined(_WASI_EMULATED_PROCESS_CLOCKS)
 clock_t clock (void);
 #else
@@ -97,9 +97,7 @@ struct tm *localtime_r (const time_t *__restrict, struct tm *__restrict);
 char *asctime_r (const struct tm *__restrict, char *__restrict);
 char *ctime_r (const time_t *, char *);
 
-#ifdef __wasilibc_unmodified_upstream /* WASI has no timezone tables */
 void tzset (void);
-#endif
 
 struct itimerspec {
 	struct timespec it_interval;
@@ -126,9 +124,7 @@ struct itimerspec {
 int nanosleep (const struct timespec *, struct timespec *);
 int clock_getres (clockid_t, struct timespec *);
 int clock_gettime (clockid_t, struct timespec *);
-#ifdef __wasilibc_unmodified_upstream /* WASI has no clock_settime */
 int clock_settime (clockid_t, const struct timespec *);
-#endif
 int clock_nanosleep (clockid_t, int, const struct timespec *, struct timespec *);
 #ifdef __wasilibc_unmodified_upstream /* WASI has no clock_getcpuclockid */
 int clock_getcpuclockid (pid_t, clockid_t *);

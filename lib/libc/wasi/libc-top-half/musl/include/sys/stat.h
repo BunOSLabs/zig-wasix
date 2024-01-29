@@ -78,14 +78,10 @@ int stat(const char *__restrict, struct stat *__restrict);
 int fstat(int, struct stat *);
 int lstat(const char *__restrict, struct stat *__restrict);
 int fstatat(int, const char *__restrict, struct stat *__restrict, int);
-#ifdef __wasilibc_unmodified_upstream /* WASI has no chmod */
 int chmod(const char *, mode_t);
 int fchmod(int, mode_t);
 int fchmodat(int, const char *, mode_t, int);
-#endif
-#ifdef __wasilibc_unmodified_upstream /* WASI has no umask */
 mode_t umask(mode_t);
-#endif
 int mkdir(const char *, mode_t);
 #ifdef __wasilibc_unmodified_upstream /* WASI has no fifo */
 int mkfifo(const char *, mode_t);
@@ -114,6 +110,7 @@ int lchmod(const char *, mode_t);
 #define S_IEXEC S_IXUSR
 #endif
 
+#ifdef __wasilibc_unmodified_upstream
 #if defined(_LARGEFILE64_SOURCE) || defined(_GNU_SOURCE)
 #define stat64 stat
 #define fstat64 fstat
@@ -133,6 +130,17 @@ __REDIR(lstat, __lstat_time64);
 __REDIR(fstatat, __fstatat_time64);
 __REDIR(futimens, __futimens_time64);
 __REDIR(utimensat, __utimensat_time64);
+#endif
+#else
+#define stat64 stat
+#define fstat64 fstat
+#define lstat64 lstat
+#define fstatat64 fstatat
+#define blkcnt64_t blkcnt_t
+#define fsblkcnt64_t fsblkcnt_t
+#define fsfilcnt64_t fsfilcnt_t
+#define ino64_t ino_t
+#define off64_t off_t
 #endif
 
 #ifdef __cplusplus

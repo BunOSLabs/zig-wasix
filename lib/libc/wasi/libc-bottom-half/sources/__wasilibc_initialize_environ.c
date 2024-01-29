@@ -11,7 +11,7 @@
 /// Statically-initialize it to an invalid pointer value so that we can
 /// detect if it's been explicitly initialized (we can't use `NULL` because
 /// `clearenv` sets it to NULL.
-weak char **__wasilibc_environ = (char **)-1;
+char **__wasilibc_environ __attribute__((__weak__)) = (char **)-1;
 
 // See the comments in libc-environ.h.
 void __wasilibc_ensure_environ(void) {
@@ -27,8 +27,8 @@ static char *empty_environ[1] = { NULL };
 // See the comments in libc-environ.h.
 void __wasilibc_initialize_environ(void) {
     // Get the sizes of the arrays we'll have to create to copy in the environment.
-    size_t environ_count;
-    size_t environ_buf_size;
+    __wasi_size_t environ_count;
+    __wasi_size_t environ_buf_size;
     __wasi_errno_t err = __wasi_environ_sizes_get(&environ_count, &environ_buf_size);
     if (err != __WASI_ERRNO_SUCCESS) {
         goto oserr;
@@ -87,7 +87,8 @@ void __wasilibc_deinitialize_environ(void) {
 }
 
 // See the comments in libc-environ.h.
-weak void __wasilibc_maybe_reinitialize_environ_eagerly(void) {
+__attribute__((__weak__))
+void __wasilibc_maybe_reinitialize_environ_eagerly(void) {
     // This version does nothing. It may be overridden by a version which does
     // something if `environ` is used.
 }

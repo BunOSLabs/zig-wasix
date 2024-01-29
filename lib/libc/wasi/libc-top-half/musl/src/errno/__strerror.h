@@ -134,4 +134,7 @@ E(EKEYREJECTED, "Key was rejected by service")
 #else
 // WASI adds this errno code.
 E(ENOTCAPABLE,  "Capabilities insufficient")
+// WASIX adds these errno code.
+E(EMEMVIOLATION,  "Memory access violation")
+E(EUNKNOWN,  "Unknown")
 #endif

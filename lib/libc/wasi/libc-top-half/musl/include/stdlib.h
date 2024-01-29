@@ -13,9 +13,7 @@ extern "C" {
 #include <features.h>
 
 #ifdef __wasilibc_unmodified_upstream /* Use the compiler's definition of NULL */
-#if __cplusplus >= 201103L
-#define NULL nullptr
-#elif defined(__cplusplus)
+#ifdef __cplusplus
 #define NULL 0L
 #else
 #define NULL ((void*)0)
@@ -100,7 +98,6 @@ size_t __ctype_get_mb_cur_max(void);
  || defined(_XOPEN_SOURCE) || defined(_GNU_SOURCE) \
  || defined(_BSD_SOURCE)
 
-#ifdef __wasilibc_unmodified_upstream /* WASI has no wait */
 #define WNOHANG    1
 #define WUNTRACED  2
 
@@ -110,16 +107,20 @@ size_t __ctype_get_mb_cur_max(void);
 #define WIFEXITED(s) (!WTERMSIG(s))
 #define WIFSTOPPED(s) ((short)((((s)&0xffff)*0x10001)>>8) > 0x7f00)
 #define WIFSIGNALED(s) (((s)&0xffff)-1U < 0xffu)
-#endif
+
+/* Macros for constructing status values.  */
+#define __W_EXITCODE(ret, sig)        ((ret) << 8 | (sig))
+#define __W_STOPCODE(sig)        ((sig) << 8 | 0x7f)
+#define __W_CONTINUED                0xffff
+#define W_EXITCODE(ret, sig)	__W_EXITCODE (ret, sig)
+#define W_STOPCODE(sig)	__W_STOPCODE (sig)
 
 int posix_memalign (void **, size_t, size_t);
 int setenv (const char *, const char *, int);
 int unsetenv (const char *);
-#ifdef __wasilibc_unmodified_upstream /* WASI has no temp directories */
 int mkstemp (char *);
 int mkostemp (char *, int);
 char *mkdtemp (char *);
-#endif
 int getsubopt (char **, char *const *, char **);
 int rand_r (unsigned *);
 
@@ -128,20 +129,18 @@ int rand_r (unsigned *);
 
 #if defined(_XOPEN_SOURCE) || defined(_GNU_SOURCE) \
  || defined(_BSD_SOURCE)
-#ifdef __wasilibc_unmodified_upstream /* WASI has no absolute paths */
 char *realpath (const char *__restrict, char *__restrict);
-#endif
 long int random (void);
 void srandom (unsigned int);
 char *initstate (unsigned int, char *, size_t);
 char *setstate (char *);
 int putenv (char *);
 #ifdef __wasilibc_unmodified_upstream /* WASI has no pseudo-terminals */
-int posix_openpt (int);
-int grantpt (int);
 int unlockpt (int);
 char *ptsname (int);
 #endif
+int posix_openpt (int);
+int grantpt (int);
 char *l64a (long);
 long a64l (const char *);
 void setkey (const char *);
@@ -158,11 +157,9 @@ void lcong48 (unsigned short [7]);
 
 #if defined(_GNU_SOURCE) || defined(_BSD_SOURCE)
 #include <alloca.h>
-#ifdef __wasilibc_unmodified_upstream /* WASI has no temp directories */
 char *mktemp (char *);
 int mkstemps (char *, int);
 int mkostemps (char *, int, int);
-#endif
 #ifdef __wasilibc_unmodified_upstream /* WASI libc doesn't build the legacy functions */
 void *valloc (size_t);
 void *memalign(size_t, size_t);
@@ -173,7 +170,6 @@ int clearenv(void);
 #define WCOREDUMP(s) ((s) & 0x80)
 #define WIFCONTINUED(s) ((s) == 0xffff)
 void *reallocarray (void *, size_t, size_t);
-void qsort_r (void *, size_t, size_t, int (*)(const void *, const void *, void *), void *);
 #endif
 #endif
 

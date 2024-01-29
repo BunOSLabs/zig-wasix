@@ -60,6 +60,8 @@ static inline void to_public_stat(const __wasi_filestat_t *in,
       break;
     case __WASI_FILETYPE_SOCKET_DGRAM:
     case __WASI_FILETYPE_SOCKET_STREAM:
+    case __WASI_FILETYPE_SOCKET_SEQPACKET:
+    case __WASI_FILETYPE_SOCKET_RAW:
       out->st_mode |= S_IFSOCK;
       break;
     case __WASI_FILETYPE_SYMBOLIC_LINK:
@@ -75,18 +77,14 @@ static inline bool utimens_get_timestamps(const struct timespec *times,
   if (times == NULL) {
     // Update both timestamps.
     *flags = __WASI_FSTFLAGS_ATIM_NOW | __WASI_FSTFLAGS_MTIM_NOW;
-    *st_atim = (__wasi_timestamp_t) { 0 };
-    *st_mtim = (__wasi_timestamp_t) { 0 };
   } else {
     // Set individual timestamps.
     *flags = 0;
     switch (times[0].tv_nsec) {
       case UTIME_NOW:
         *flags |= __WASI_FSTFLAGS_ATIM_NOW;
-        *st_atim = (__wasi_timestamp_t) { 0 };
         break;
       case UTIME_OMIT:
-        *st_atim = (__wasi_timestamp_t) { 0 };
         break;
       default:
         *flags |= __WASI_FSTFLAGS_ATIM;
@@ -98,10 +96,8 @@ static inline bool utimens_get_timestamps(const struct timespec *times,
     switch (times[1].tv_nsec) {
       case UTIME_NOW:
         *flags |= __WASI_FSTFLAGS_MTIM_NOW;
-        *st_mtim = (__wasi_timestamp_t) { 0 };
         break;
       case UTIME_OMIT:
-        *st_mtim = (__wasi_timestamp_t) { 0 };
         break;
       default:
         *flags |= __WASI_FSTFLAGS_MTIM;

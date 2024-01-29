@@ -42,7 +42,7 @@ struct __libc {
 	size_t page_size;
 #endif
 	struct __locale_struct global_locale;
-#if defined(__wasilibc_unmodified_upstream) || defined(_REENTRANT)
+#if defined(__wasilibc_unmodified_upstream) && defined(_REENTRANT)
 #else
 	struct __locale_struct *current_locale;
 #endif
@@ -50,6 +50,9 @@ struct __libc {
 
 #ifndef PAGE_SIZE
 #define PAGE_SIZE libc.page_size
+#endif
+#ifndef LINUX_PAGE_SIZE
+#define LINUX_PAGE_SIZE 4096
 #endif
 
 extern hidden struct __libc __libc;

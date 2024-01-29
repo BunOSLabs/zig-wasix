@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: BSD-2-Clause
 
+#include <errno.h>
 #include <sys/socket.h>
 
 #include <assert.h>
@@ -9,24 +10,19 @@
 #include <errno.h>
 #include <stdint.h>
 
-static_assert(MSG_PEEK == __WASI_RIFLAGS_RECV_PEEK, "Value mismatch");
-static_assert(MSG_WAITALL == __WASI_RIFLAGS_RECV_WAITALL, "Value mismatch");
-
 ssize_t recv(int socket, void *restrict buffer, size_t length, int flags) {
-  // Validate flags.
-  if ((flags & ~(MSG_PEEK | MSG_WAITALL)) != 0) {
-    errno = EOPNOTSUPP;
-    return -1;
-  }
-
   // Prepare input parameters.
   __wasi_iovec_t iov = {.buf = buffer, .buf_len = length};
   __wasi_iovec_t *ri_data = &iov;
   size_t ri_data_len = 1;
-  __wasi_riflags_t ri_flags = flags;
+  __wasi_riflags_t ri_flags = 0;
+
+  if ((flags & MSG_PEEK) != 0) { ri_flags |= __WASI_RIFLAGS_RECV_PEEK; }
+  if ((flags & MSG_WAITALL) != 0) { ri_flags |= __WASI_RIFLAGS_RECV_WAITALL; }
+  if ((flags & MSG_TRUNC) != 0) { ri_flags |= __WASI_RIFLAGS_RECV_DATA_TRUNCATED; }
 
   // Perform system call.
-  size_t ro_datalen;
+  __wasi_size_t ro_datalen;
   __wasi_roflags_t ro_flags;
   __wasi_errno_t error = __wasi_sock_recv(socket,
                                           ri_data, ri_data_len, ri_flags,

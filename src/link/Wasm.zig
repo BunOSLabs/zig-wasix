@@ -3583,13 +3583,6 @@ fn linkWithZld(wasm: *Wasm, arena: Allocator, prog_node: *std.Progress.Node) lin
         const is_exe_or_dyn_lib = output_mode == .Exe or
             (output_mode == .Lib and link_mode == .Dynamic);
         if (is_exe_or_dyn_lib) {
-            for (comp.wasi_emulated_libs) |crt_file| {
-                try positionals.append(try comp.get_libc_crt_file(
-                    arena,
-                    wasi_libc.emulatedLibCRFileLibName(crt_file),
-                ));
-            }
-
             if (link_libc) {
                 try positionals.append(try comp.get_libc_crt_file(
                     arena,
@@ -4779,13 +4772,6 @@ fn linkWithLLD(wasm: *Wasm, arena: Allocator, prog_node: *std.Progress.Node) !vo
             const is_exe_or_dyn_lib = comp.config.output_mode == .Exe or
                 (comp.config.output_mode == .Lib and comp.config.link_mode == .Dynamic);
             if (is_exe_or_dyn_lib) {
-                for (comp.wasi_emulated_libs) |crt_file| {
-                    try argv.append(try comp.get_libc_crt_file(
-                        arena,
-                        wasi_libc.emulatedLibCRFileLibName(crt_file),
-                    ));
-                }
-
                 if (comp.config.link_libc) {
                     try argv.append(try comp.get_libc_crt_file(
                         arena,

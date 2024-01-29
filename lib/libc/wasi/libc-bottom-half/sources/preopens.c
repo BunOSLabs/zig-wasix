@@ -172,10 +172,11 @@ int __wasilibc_find_relpath(const char *path,
 int __wasilibc_find_abspath(const char *path,
                             const char **abs_prefix,
                             const char **relative_path) {
-    // Strip leading `/` characters, the prefixes we're mataching won't have
+    // Strip leading `/` characters, the prefixes we're matching won't have
     // them.
-    while (*path == '/')
-        path++;
+    const char *search_path = path;
+    while (*search_path == '/')
+        search_path++;
     // Search through the preopens table. Iterate in reverse so that more
     // recently added preopens take precedence over less recently addded ones.
     size_t match_len = 0;
@@ -190,10 +191,17 @@ int __wasilibc_find_abspath(const char *path,
         // our current best match's path, and the candidate path is a prefix of
         // the requested path, take that as the new best path.
         if ((fd == -1 || len > match_len) &&
-            prefix_matches(prefix, len, path))
+            prefix_matches(prefix, len, search_path))
         {
             fd = pre->fd;
-            match_len = len;
+            if(len) {
+                // also skip the leading '/'
+                match_len = len + (search_path - path);
+                // and  skip '/' following the preopenned folder too
+                while(path[match_len]=='/')
+                    ++match_len;
+            } else  // but don't remove leading '/' for root parent fd
+                match_len = 0;
             *abs_prefix = prefix;
         }
     }
@@ -207,10 +215,6 @@ int __wasilibc_find_abspath(const char *path,
     // The relative path is the substring after the portion that was matched.
     const char *computed = path + match_len;
 
-    // Omit leading slashes in the relative path.
-    while (*computed == '/')
-        ++computed;
-
     // *at syscalls don't accept empty relative paths, so use "." instead.
     if (*computed == '\0')
         computed = ".";
@@ -219,6 +223,9 @@ int __wasilibc_find_abspath(const char *path,
     return fd;
 }
 
+// WebAssembly should only preopen files once
+volatile int __wasilibc_populate_preopens_init __attribute__((__weak__)) = (int)0;
+
 /// This is referenced by weak reference from crt1.c and lives in the same
 /// source file as `__wasilibc_find_relpath` so that it's linked in when it's
 /// needed.
@@ -226,37 +233,41 @@ int __wasilibc_find_abspath(const char *path,
 // libc-bottom-half/sources/environ.c.
 __attribute__((constructor(51)))
 static void __wasilibc_populate_preopens(void) {
-    // Skip stdin, stdout, and stderr, and count up until we reach an invalid
-    // file descriptor.
-    for (__wasi_fd_t fd = 3; fd != 0; ++fd) {
-        __wasi_prestat_t prestat;
-        __wasi_errno_t ret = __wasi_fd_prestat_get(fd, &prestat);
-        if (ret == __WASI_ERRNO_BADF)
-            break;
-        if (ret != __WASI_ERRNO_SUCCESS)
-            goto oserr;
-        switch (prestat.tag) {
-        case __WASI_PREOPENTYPE_DIR: {
-            char *prefix = malloc(prestat.u.dir.pr_name_len + 1);
-            if (prefix == NULL)
-                goto software;
+    if (__wasilibc_populate_preopens_init == 0) {
+        __wasilibc_populate_preopens_init = 1;
 
-            // TODO: Remove the cast on `path` once the witx is updated with
-            // char8 support.
-            ret = __wasi_fd_prestat_dir_name(fd, (uint8_t *)prefix,
-                                             prestat.u.dir.pr_name_len);
+        // Skip stdin, stdout, and stderr, and count up until we reach an invalid
+        // file descriptor.
+        for (__wasi_fd_t fd = 3; fd != 0; ++fd) {
+            __wasi_prestat_t prestat;
+            __wasi_errno_t ret = __wasi_fd_prestat_get(fd, &prestat);
+            if (ret == __WASI_ERRNO_BADF)
+                break;
             if (ret != __WASI_ERRNO_SUCCESS)
                 goto oserr;
-            prefix[prestat.u.dir.pr_name_len] = '\0';
+            switch (prestat.tag) {
+            case __WASI_PREOPENTYPE_DIR: {
+                char *prefix = malloc(prestat.u.dir.pr_name_len + 1);
+                if (prefix == NULL)
+                    goto software;
 
-            if (internal_register_preopened_fd(fd, prefix) != 0)
-                goto software;
-            free(prefix);
+                // TODO: Remove the cast on `path` once the witx is updated with
+                // char8 support.
+                ret = __wasi_fd_prestat_dir_name(fd, (uint8_t *)prefix,
+                                                prestat.u.dir.pr_name_len);
+                if (ret != __WASI_ERRNO_SUCCESS)
+                    goto oserr;
+                prefix[prestat.u.dir.pr_name_len] = '\0';
 
-            break;
-        }
-        default:
-            break;
+                if (internal_register_preopened_fd(fd, prefix) != 0)
+                    goto software;
+                free(prefix);
+
+                break;
+            }
+            default:
+                break;
+            }
         }
     }
 

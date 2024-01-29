@@ -1,4 +1,19 @@
-#ifdef _WASI_EMULATED_SIGNAL
+#pragma once
+
+#include <bits/alltypes.h>
+
+struct sigaltstack {
+	void *ss_sp;
+	int ss_flags;
+	size_t ss_size;
+};
+
+typedef struct sigaltstack stack_t;
+
+int sigaltstack(const stack_t *__restrict ss, stack_t *__restrict old);
+
+#define MINSIGSTKSZ 2048
+#define SIGSTKSZ 8192
 
 #define SIGHUP    1
 #define SIGINT    2
@@ -36,5 +51,14 @@
 #define SIGUNUSED SIGSYS
 
 #define _NSIG 65
+#define _NSIG_BPW   32
+#define _NSIG_WORDS (_NSIG / _NSIG_BPW)
 
-#endif
+#define SA_NOCLDSTOP  1
+#define SA_NOCLDWAIT  2
+#define SA_SIGINFO    4
+#define SA_ONSTACK    0x08000000
+#define SA_RESTART    0x10000000
+#define SA_NODEFER    0x40000000
+#define SA_RESETHAND  0x80000000
+#define SA_RESTORER   0x04000000

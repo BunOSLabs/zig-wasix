@@ -9,10 +9,15 @@
 #include <errno.h>
 
 ssize_t send(int socket, const void *buffer, size_t length, int flags) {
-  // This implementation does not support any flags.
-  if (flags != 0) {
+  // This implementation does not support any flags, but we can ignore NOSIGNAL
+  if ((flags&~MSG_NOSIGNAL) != 0) {
     errno = EOPNOTSUPP;
     return -1;
+  }
+
+  if (buffer == NULL) {
+	  errno = EINVAL;
+	  return -1;
   }
 
   // Prepare input parameters.
@@ -22,7 +27,7 @@ ssize_t send(int socket, const void *buffer, size_t length, int flags) {
   __wasi_siflags_t si_flags = 0;
 
   // Perform system call.
-  size_t so_datalen;
+  __wasi_size_t so_datalen;
   __wasi_errno_t error = __wasi_sock_send(socket, si_data, si_data_len, si_flags, &so_datalen);
   if (error != 0) {
     errno = error;

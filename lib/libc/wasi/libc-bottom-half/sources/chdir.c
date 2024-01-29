@@ -18,18 +18,16 @@ void __wasilibc_cwd_unlock(void);
 extern char *__wasilibc_cwd;
 static int __wasilibc_cwd_mallocd = 0;
 
-int chdir(const char *path)
+int chdir_legacy(const char *path)
 {
     static char *relative_buf = NULL;
     static size_t relative_buf_len = 0;
-
     // Find a preopen'd directory as well as a relative path we're anchored
     // from which we're changing directories to.
     const char *abs;
     int parent_fd = __wasilibc_find_relpath_alloc(path, &abs, &relative_buf, &relative_buf_len, 1);
     if (parent_fd == -1)
         return -1;
-
     // Make sure that this directory we're accessing is indeed a directory.
     struct stat dirinfo;
     int ret = fstatat(parent_fd, relative_buf, &dirinfo, 0);
@@ -39,7 +37,7 @@ int chdir(const char *path)
         errno = ENOTDIR;
         return -1;
     }
-
+        
     // Create a string that looks like:
     //
     //    __wasilibc_cwd = "/" + abs + "/" + relative_buf
@@ -61,12 +59,11 @@ int chdir(const char *path)
     if (copy_relative)
         strcpy(new_cwd + 1 + abs_len + mid, relative_buf);
 
-    // And set our new malloc'd buffer into the global cwd, freeing the
-    // previous one if necessary.
     __wasilibc_cwd_lock();
     char *prev_cwd = __wasilibc_cwd;
     __wasilibc_cwd = new_cwd;
     __wasilibc_cwd_unlock();
+
     if (__wasilibc_cwd_mallocd)
         free(prev_cwd);
     __wasilibc_cwd_mallocd = 1;
@@ -168,4 +165,19 @@ int __wasilibc_find_relpath_alloc(
     }
     strcpy(*relative_buf, rel);
     return fd;
+}
+
+int chdir(const char *path)
+{
+    // we run the legacy chdir function that emulates real
+    // current directory functionality for backwards compatibility reasons
+    chdir_legacy(path);
+
+    // otherwise we let the operating system know we are changing the current path
+    __wasi_errno_t error = __wasi_chdir(path);
+    if (error != 0) {
+      errno = error;
+      return -1;
+    }
+    return 0;
 }

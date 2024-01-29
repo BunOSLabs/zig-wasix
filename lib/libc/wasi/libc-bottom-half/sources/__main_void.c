@@ -2,13 +2,8 @@
 #include <stdlib.h>
 #include <sysexits.h>
 
-int __wasilibc_main(int argc, char *argv[]) asm("main");
-
 // The user's `main` function, expecting arguments.
-__attribute__((__weak__, nodebug))
-int __main_argc_argv(int argc, char *argv[]) {
-    return __wasilibc_main(argc, argv);
-}
+int __main_argc_argv(int argc, char *argv[]);
 
 // If the user's `main` function expects arguments, the compiler will rename
 // it to `__main_argc_argv`, and this version will get linked in, which
@@ -18,8 +13,8 @@ int __main_void(void) {
     __wasi_errno_t err;
 
     // Get the sizes of the arrays we'll have to create to copy in the args.
-    size_t argv_buf_size;
-    size_t argc;
+    __wasi_size_t argv_buf_size;
+    __wasi_size_t argc;
     err = __wasi_args_sizes_get(&argc, &argv_buf_size);
     if (err != __WASI_ERRNO_SUCCESS) {
         _Exit(EX_OSERR);

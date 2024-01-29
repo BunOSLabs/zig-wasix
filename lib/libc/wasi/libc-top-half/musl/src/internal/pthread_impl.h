@@ -18,6 +18,7 @@
 #include "futex.h"
 
 #include "pthread_arch.h"
+#include <wasi/libc.h>
 
 #define pthread __pthread
 
@@ -186,7 +187,8 @@ static inline void __wake(volatile void *addr, int cnt, int priv)
 	__syscall(SYS_futex, addr, FUTEX_WAKE|priv, cnt) != -ENOSYS ||
 	__syscall(SYS_futex, addr, FUTEX_WAKE, cnt);
 #else
-	__builtin_wasm_memory_atomic_notify((int*)addr, cnt);
+	__wasilibc_futex_wake_wasix((int*)addr, cnt);
+	//__builtin_wasm_memory_atomic_notify((int*)addr, cnt);
 #endif
 }
 static inline void __futexwait(volatile void *addr, int val, int priv)
@@ -208,6 +210,10 @@ hidden void __tl_lock(void);
 hidden void __tl_unlock(void);
 hidden void __tl_sync(pthread_t);
 
+hidden void __vm_wait(void);
+hidden void __vm_lock(void);
+hidden void __vm_unlock(void);
+
 extern hidden volatile int __thread_list_lock;
 
 extern hidden volatile int __abort_lock[1];
@@ -219,8 +225,7 @@ extern hidden unsigned __default_guardsize;
 #ifdef __wasilibc_unmodified_upstream
 #define DEFAULT_GUARD_SIZE 8192
 #else
-/* guard doesn't make much sense without mprotect. */
-#define DEFAULT_GUARD_SIZE 0
+#define DEFAULT_GUARD_SIZE 4096
 #endif
 
 #define DEFAULT_STACK_MAX (8<<20)

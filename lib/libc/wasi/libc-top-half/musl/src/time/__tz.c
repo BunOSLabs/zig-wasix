@@ -3,10 +3,7 @@
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
-#ifdef __wasilibc_unmodified_upstream // timezone data
 #include <sys/mman.h>
-#include <ctype.h>
-#endif
 #include "libc.h"
 #include "lock.h"
 #include "fork_impl.h"
@@ -16,7 +13,6 @@
 #define realloc undef
 #define free undef
 
-#ifdef __wasilibc_unmodified_upstream // timezone data
 long  __timezone = 0;
 int   __daylight = 0;
 char *__tzname[2] = { 0, 0 };
@@ -27,8 +23,10 @@ weak_alias(__tzname, tzname);
 
 static char std_name[TZNAME_MAX+1];
 static char dst_name[TZNAME_MAX+1];
-#endif
 const char __utc[] = "UTC";
+
+static volatile int lock[1];
+volatile int *const __timezone_lockptr = lock;
 
 #ifdef __wasilibc_unmodified_upstream // timezone data
 static int dst_off;
@@ -40,9 +38,6 @@ static size_t map_size;
 static char old_tz_buf[32];
 static char *old_tz = old_tz_buf;
 static size_t old_tz_size = sizeof old_tz_buf;
-
-static volatile int lock[1];
-volatile int *const __timezone_lockptr = lock;
 
 static int getint(const char **p)
 {
@@ -160,21 +155,10 @@ static void do_tzset()
 	}
 	if (old_tz) memcpy(old_tz, s, i+1);
 
-	int posix_form = 0;
-	if (*s != ':') {
-		p = s;
-		char dummy_name[TZNAME_MAX+1];
-		getname(dummy_name, &p);
-		if (p!=s && (*p == '+' || *p == '-' || isdigit(*p)
-		             || !strcmp(dummy_name, "UTC")
-		             || !strcmp(dummy_name, "GMT")))
-			posix_form = 1;
-	}	
-
 	/* Non-suid can use an absolute tzfile pathname or a relative
 	 * pathame beginning with "."; in secure mode, only the
 	 * standard path will be searched. */
-	if (!posix_form) {
+	if (*s == ':' || ((p=strchr(s, '/')) && !memchr(s, ',', p-s))) {
 		if (*s == ':') s++;
 		if (*s == '/' || *s == '.') {
 			if (!libc.secure || !strcmp(s, "/etc/localtime"))
@@ -298,20 +282,22 @@ static size_t scan_trans(long long t, int local, size_t *alt)
 	n = (index-trans)>>scale;
 	if (a == n-1) return -1;
 	if (a == 0) {
-		x = zi_read32(trans);
-		if (scale == 3) x = x<<32 | zi_read32(trans + 4);
+		x = zi_read32(trans + (a<<scale));
+		if (scale == 3) x = x<<32 | zi_read32(trans + (a<<scale) + 4);
 		else x = (int32_t)x;
-		/* Find the lowest non-DST type, or 0 if none. */
-		size_t j = 0;
-		for (size_t i=abbrevs-types; i; i-=6) {
-			if (!types[i-6+4]) j = i-6;
-		}
-		if (local) off = (int32_t)zi_read32(types + j);
-		/* If t is before first transition, use the above-found type
-		 * and the index-zero (after transition) type as the alt. */
+		if (local) off = (int32_t)zi_read32(types + 6 * index[a-1]);
 		if (t - off < (int64_t)x) {
-			if (alt) *alt = index[0];
-			return j/6;
+			for (a=0; a<(abbrevs-types)/6; a++) {
+				if (types[6*a+4] != types[4]) break;
+			}
+			if (a == (abbrevs-types)/6) a = 0;
+			if (types[6*a+4]) {
+				*alt = a;
+				return 0;
+			} else {
+				*alt = 0;
+				return a;
+			}
 		}
 	}
 
@@ -431,6 +417,14 @@ static void __tzset()
 
 weak_alias(__tzset, tzset);
 #else
+static void __tzset()
+{
+	LOCK(lock);
+	UNLOCK(lock);
+}
+
+weak_alias(__tzset, tzset);
+
 void __secs_to_zone(long long t, int local, int *isdst, int *offset, long *oppoff, const char **zonename)
 {
 	// Minimalist implementation for now.
