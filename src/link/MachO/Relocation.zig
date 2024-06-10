@@ -22,7 +22,7 @@ pub fn getTargetAtom(rel: Relocation, macho_file: *MachO) *Atom {
 
 pub fn getTargetAddress(rel: Relocation, macho_file: *MachO) u64 {
     return switch (rel.tag) {
-        .local => rel.getTargetAtom(macho_file).value,
+        .local => rel.getTargetAtom(macho_file).getAddress(macho_file),
         .@"extern" => rel.getTargetSymbol(macho_file).getAddress(.{}, macho_file),
     };
 }
@@ -60,36 +60,57 @@ pub fn lessThan(ctx: void, lhs: Relocation, rhs: Relocation) bool {
     return lhs.offset < rhs.offset;
 }
 
-pub fn calcNumberOfPages(saddr: u64, taddr: u64) error{Overflow}!i21 {
-    const spage = math.cast(i32, saddr >> 12) orelse return error.Overflow;
-    const tpage = math.cast(i32, taddr >> 12) orelse return error.Overflow;
-    const pages = math.cast(i21, tpage - spage) orelse return error.Overflow;
-    return pages;
+const FormatCtx = struct { Relocation, std.Target.Cpu.Arch };
+
+pub fn fmtPretty(rel: Relocation, cpu_arch: std.Target.Cpu.Arch) std.fmt.Formatter(formatPretty) {
+    return .{ .data = .{ rel, cpu_arch } };
 }
 
-pub const PageOffsetInstKind = enum {
-    arithmetic,
-    load_store_8,
-    load_store_16,
-    load_store_32,
-    load_store_64,
-    load_store_128,
-};
-
-pub fn calcPageOffset(taddr: u64, kind: PageOffsetInstKind) !u12 {
-    const narrowed = @as(u12, @truncate(taddr));
-    return switch (kind) {
-        .arithmetic, .load_store_8 => narrowed,
-        .load_store_16 => try math.divExact(u12, narrowed, 2),
-        .load_store_32 => try math.divExact(u12, narrowed, 4),
-        .load_store_64 => try math.divExact(u12, narrowed, 8),
-        .load_store_128 => try math.divExact(u12, narrowed, 16),
+fn formatPretty(
+    ctx: FormatCtx,
+    comptime unused_fmt_string: []const u8,
+    options: std.fmt.FormatOptions,
+    writer: anytype,
+) !void {
+    _ = options;
+    _ = unused_fmt_string;
+    const rel, const cpu_arch = ctx;
+    const str = switch (rel.type) {
+        .signed => "X86_64_RELOC_SIGNED",
+        .signed1 => "X86_64_RELOC_SIGNED_1",
+        .signed2 => "X86_64_RELOC_SIGNED_2",
+        .signed4 => "X86_64_RELOC_SIGNED_4",
+        .got_load => "X86_64_RELOC_GOT_LOAD",
+        .tlv => "X86_64_RELOC_TLV",
+        .zig_got_load => "ZIG_GOT_LOAD",
+        .page => "ARM64_RELOC_PAGE21",
+        .pageoff => "ARM64_RELOC_PAGEOFF12",
+        .got_load_page => "ARM64_RELOC_GOT_LOAD_PAGE21",
+        .got_load_pageoff => "ARM64_RELOC_GOT_LOAD_PAGEOFF12",
+        .tlvp_page => "ARM64_RELOC_TLVP_LOAD_PAGE21",
+        .tlvp_pageoff => "ARM64_RELOC_TLVP_LOAD_PAGEOFF12",
+        .branch => switch (cpu_arch) {
+            .x86_64 => "X86_64_RELOC_BRANCH",
+            .aarch64 => "ARM64_RELOC_BRANCH26",
+            else => unreachable,
+        },
+        .got => switch (cpu_arch) {
+            .x86_64 => "X86_64_RELOC_GOT",
+            .aarch64 => "ARM64_RELOC_POINTER_TO_GOT",
+            else => unreachable,
+        },
+        .subtractor => switch (cpu_arch) {
+            .x86_64 => "X86_64_RELOC_SUBTRACTOR",
+            .aarch64 => "ARM64_RELOC_SUBTRACTOR",
+            else => unreachable,
+        },
+        .unsigned => switch (cpu_arch) {
+            .x86_64 => "X86_64_RELOC_UNSIGNED",
+            .aarch64 => "ARM64_RELOC_UNSIGNED",
+            else => unreachable,
+        },
     };
-}
-
-pub inline fn isArithmeticOp(inst: *const [4]u8) bool {
-    const group_decode = @as(u5, @truncate(inst[3]));
-    return ((group_decode >> 2) == 4);
+    try writer.writeAll(str);
 }
 
 pub const Type = enum {

@@ -14,8 +14,8 @@ file: File.Index = 0,
 /// Use `getAtom` to get the pointer to the atom.
 atom: Atom.Index = 0,
 
-/// Assigned output section index for this atom.
-out_n_sect: u16 = 0,
+/// Assigned output section index for this symbol.
+out_n_sect: u8 = 0,
 
 /// Index of the source nlist this symbol references.
 /// Use `getNlist` to pull the nlist from the relevant file.
@@ -118,7 +118,7 @@ pub fn getAddress(symbol: Symbol, opts: struct {
             return symbol.getObjcStubsAddress(macho_file);
         }
     }
-    if (symbol.getAtom(macho_file)) |atom| return atom.value + symbol.value;
+    if (symbol.getAtom(macho_file)) |atom| return atom.getAddress(macho_file) + symbol.value;
     return symbol.value;
 }
 
@@ -145,7 +145,7 @@ pub fn getObjcSelrefsAddress(symbol: Symbol, macho_file: *MachO) u64 {
     const extra = symbol.getExtra(macho_file).?;
     const atom = macho_file.getAtom(extra.objc_selrefs).?;
     assert(atom.flags.alive);
-    return atom.value;
+    return atom.getAddress(macho_file);
 }
 
 pub fn getTlvPtrAddress(symbol: Symbol, macho_file: *MachO) u64 {

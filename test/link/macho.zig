@@ -3,9 +3,6 @@
 pub fn testAll(b: *Build, build_opts: BuildOptions) *Step {
     const macho_step = b.step("test-macho", "Run MachO tests");
 
-    const default_target = b.resolveTargetQuery(.{
-        .os_tag = .macos,
-    });
     const x86_64_target = b.resolveTargetQuery(.{
         .cpu_arch = .x86_64,
         .os_tag = .macos,
@@ -15,6 +12,21 @@ pub fn testAll(b: *Build, build_opts: BuildOptions) *Step {
         .os_tag = .macos,
     });
 
+    const default_target = switch (builtin.cpu.arch) {
+        .x86_64, .aarch64 => b.resolveTargetQuery(.{
+            .os_tag = .macos,
+        }),
+        else => aarch64_target,
+    };
+
+    // Exercise linker with self-hosted backend (no LLVM)
+    macho_step.dependOn(testEmptyZig(b, .{ .use_llvm = false, .target = x86_64_target }));
+    macho_step.dependOn(testHelloZig(b, .{ .use_llvm = false, .target = x86_64_target }));
+    macho_step.dependOn(testLinkingStaticLib(b, .{ .use_llvm = false, .target = x86_64_target }));
+    macho_step.dependOn(testReexportsZig(b, .{ .use_llvm = false, .target = x86_64_target }));
+    macho_step.dependOn(testRelocatableZig(b, .{ .use_llvm = false, .target = x86_64_target }));
+
+    // Exercise linker with LLVM backend
     macho_step.dependOn(testDeadStrip(b, .{ .target = default_target }));
     macho_step.dependOn(testEmptyObject(b, .{ .target = default_target }));
     macho_step.dependOn(testEmptyZig(b, .{ .target = default_target }));
@@ -24,7 +36,12 @@ pub fn testAll(b: *Build, build_opts: BuildOptions) *Step {
     macho_step.dependOn(testHelloZig(b, .{ .target = default_target }));
     macho_step.dependOn(testLargeBss(b, .{ .target = default_target }));
     macho_step.dependOn(testLayout(b, .{ .target = default_target }));
+    macho_step.dependOn(testLinkingStaticLib(b, .{ .target = default_target }));
     macho_step.dependOn(testLinksection(b, .{ .target = default_target }));
+    macho_step.dependOn(testMergeLiteralsX64(b, .{ .target = x86_64_target }));
+    macho_step.dependOn(testMergeLiteralsArm64(b, .{ .target = aarch64_target }));
+    macho_step.dependOn(testMergeLiteralsArm642(b, .{ .target = aarch64_target }));
+    macho_step.dependOn(testMergeLiteralsAlignment(b, .{ .target = aarch64_target }));
     macho_step.dependOn(testMhExecuteHeader(b, .{ .target = default_target }));
     macho_step.dependOn(testNoDeadStrip(b, .{ .target = default_target }));
     macho_step.dependOn(testNoExportsDylib(b, .{ .target = default_target }));
@@ -34,6 +51,7 @@ pub fn testAll(b: *Build, build_opts: BuildOptions) *Step {
     macho_step.dependOn(testRelocatableZig(b, .{ .target = default_target }));
     macho_step.dependOn(testSectionBoundarySymbols(b, .{ .target = default_target }));
     macho_step.dependOn(testSegmentBoundarySymbols(b, .{ .target = default_target }));
+    macho_step.dependOn(testSymbolStabs(b, .{ .target = default_target }));
     macho_step.dependOn(testStackSize(b, .{ .target = default_target }));
     macho_step.dependOn(testTentative(b, .{ .target = default_target }));
     macho_step.dependOn(testThunks(b, .{ .target = aarch64_target }));
@@ -43,16 +61,23 @@ pub fn testAll(b: *Build, build_opts: BuildOptions) *Step {
     macho_step.dependOn(testUnwindInfoNoSubsectionsX64(b, .{ .target = x86_64_target }));
     macho_step.dependOn(testUnwindInfoNoSubsectionsArm64(b, .{ .target = aarch64_target }));
     macho_step.dependOn(testWeakBind(b, .{ .target = x86_64_target }));
+    macho_step.dependOn(testWeakRef(b, .{ .target = b.resolveTargetQuery(.{
+        .cpu_arch = .x86_64,
+        .os_tag = .macos,
+        .os_version_min = .{ .semver = .{ .major = 10, .minor = 13, .patch = 0 } },
+    }) }));
 
-    // Tests requiring symlinks when tested on Windows
-    if (build_opts.has_symlinks_windows) {
+    // Tests requiring symlinks
+    if (build_opts.has_symlinks) {
         macho_step.dependOn(testEntryPointArchive(b, .{ .target = default_target }));
         macho_step.dependOn(testEntryPointDylib(b, .{ .target = default_target }));
         macho_step.dependOn(testDylib(b, .{ .target = default_target }));
+        macho_step.dependOn(testDylibVersionTbd(b, .{ .target = default_target }));
         macho_step.dependOn(testNeededLibrary(b, .{ .target = default_target }));
         macho_step.dependOn(testSearchStrategy(b, .{ .target = default_target }));
         macho_step.dependOn(testTbdv3(b, .{ .target = default_target }));
         macho_step.dependOn(testTls(b, .{ .target = default_target }));
+        macho_step.dependOn(testTlsPointers(b, .{ .target = default_target }));
         macho_step.dependOn(testTwoLevelNamespace(b, .{ .target = default_target }));
         macho_step.dependOn(testWeakLibrary(b, .{ .target = default_target }));
 
@@ -61,6 +86,7 @@ pub fn testAll(b: *Build, build_opts: BuildOptions) *Step {
             macho_step.dependOn(testDeadStripDylibs(b, .{ .target = b.host }));
             macho_step.dependOn(testHeaderpad(b, .{ .target = b.host }));
             macho_step.dependOn(testLinkDirectlyCppTbd(b, .{ .target = b.host }));
+            macho_step.dependOn(testMergeLiteralsObjc(b, .{ .target = b.host }));
             macho_step.dependOn(testNeededFramework(b, .{ .target = b.host }));
             macho_step.dependOn(testObjc(b, .{ .target = b.host }));
             macho_step.dependOn(testObjcpp(b, .{ .target = b.host }));
@@ -72,7 +98,7 @@ pub fn testAll(b: *Build, build_opts: BuildOptions) *Step {
 }
 
 fn testDeadStrip(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-dead-strip", opts);
+    const test_step = addTestStep(b, "dead-strip", opts);
 
     const obj = addObject(b, opts, .{ .name = "a", .cpp_source_bytes = 
     \\#include <stdio.h>
@@ -153,7 +179,7 @@ fn testDeadStrip(b: *Build, opts: Options) *Step {
 }
 
 fn testDeadStripDylibs(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-dead-strip-dylibs", opts);
+    const test_step = addTestStep(b, "dead-strip-dylibs", opts);
 
     const main_o = addObject(b, opts, .{ .name = "main", .c_source_bytes = 
     \\#include <objc/runtime.h>
@@ -202,7 +228,7 @@ fn testDeadStripDylibs(b: *Build, opts: Options) *Step {
 }
 
 fn testDylib(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-dylib", opts);
+    const test_step = addTestStep(b, "dylib", opts);
 
     const dylib = addSharedLibrary(b, opts, .{ .name = "a", .c_source_bytes = 
     \\#include<stdio.h>
@@ -238,8 +264,44 @@ fn testDylib(b: *Build, opts: Options) *Step {
     return test_step;
 }
 
+fn testDylibVersionTbd(b: *Build, opts: Options) *Step {
+    const test_step = addTestStep(b, "dylib-version-tbd", opts);
+
+    const tbd = tbd: {
+        const wf = WriteFile.create(b);
+        break :tbd wf.add("liba.tbd",
+            \\--- !tapi-tbd
+            \\tbd-version:     4
+            \\targets:         [ x86_64-macos, arm64-macos ]
+            \\uuids:
+            \\  - target:          x86_64-macos
+            \\    value:           DEADBEEF
+            \\  - target:          arm64-macos
+            \\    value:           BEEFDEAD
+            \\install-name:    '@rpath/liba.dylib'
+            \\current-version: 1.2
+            \\exports:
+            \\  - targets:     [ x86_64-macos, arm64-macos ]
+            \\    symbols:     [ _foo ]
+        );
+    };
+
+    const exe = addExecutable(b, opts, .{ .name = "main", .c_source_bytes = "int main() {}" });
+    exe.root_module.linkSystemLibrary("a", .{});
+    exe.root_module.addLibraryPath(tbd.dirname());
+
+    const check = exe.checkObject();
+    check.checkInHeaders();
+    check.checkExact("cmd LOAD_DYLIB");
+    check.checkExact("name @rpath/liba.dylib");
+    check.checkExact("current version 10200");
+    test_step.dependOn(&check.step);
+
+    return test_step;
+}
+
 fn testEmptyObject(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-empty-object", opts);
+    const test_step = addTestStep(b, "empty-object", opts);
 
     const empty = addObject(b, opts, .{ .name = "empty", .c_source_bytes = "" });
 
@@ -259,7 +321,7 @@ fn testEmptyObject(b: *Build, opts: Options) *Step {
 }
 
 fn testEmptyZig(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-empty-zig", opts);
+    const test_step = addTestStep(b, "empty-zig", opts);
 
     const exe = addExecutable(b, opts, .{ .name = "empty", .zig_source_bytes = "pub fn main() void {}" });
 
@@ -271,7 +333,7 @@ fn testEmptyZig(b: *Build, opts: Options) *Step {
 }
 
 fn testEntryPoint(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-entry-point", opts);
+    const test_step = addTestStep(b, "entry-point", opts);
 
     const exe = addExecutable(b, opts, .{ .name = "main", .c_source_bytes = 
     \\#include<stdio.h>
@@ -302,7 +364,7 @@ fn testEntryPoint(b: *Build, opts: Options) *Step {
 }
 
 fn testEntryPointArchive(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-entry-point-archive", opts);
+    const test_step = addTestStep(b, "entry-point-archive", opts);
 
     const lib = addStaticLibrary(b, opts, .{ .name = "main", .c_source_bytes = "int main() { return 0; }" });
 
@@ -331,7 +393,7 @@ fn testEntryPointArchive(b: *Build, opts: Options) *Step {
 }
 
 fn testEntryPointDylib(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-entry-point-dylib", opts);
+    const test_step = addTestStep(b, "entry-point-dylib", opts);
 
     const dylib = addSharedLibrary(b, opts, .{ .name = "a" });
     addCSourceBytes(dylib,
@@ -385,7 +447,7 @@ fn testEntryPointDylib(b: *Build, opts: Options) *Step {
 }
 
 fn testHeaderpad(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-headerpad", opts);
+    const test_step = addTestStep(b, "headerpad", opts);
 
     const addExe = struct {
         fn addExe(bb: *Build, o: Options, name: []const u8) *Compile {
@@ -493,7 +555,7 @@ fn testHeaderpad(b: *Build, opts: Options) *Step {
 
 // Adapted from https://github.com/llvm/llvm-project/blob/main/lld/test/MachO/weak-header-flags.s
 fn testHeaderWeakFlags(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-header-weak-flags", opts);
+    const test_step = addTestStep(b, "header-weak-flags", opts);
 
     const obj1 = addObject(b, opts, .{ .name = "a", .asm_source_bytes = 
     \\.globl _x
@@ -580,7 +642,7 @@ fn testHeaderWeakFlags(b: *Build, opts: Options) *Step {
 }
 
 fn testHelloC(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-hello-c", opts);
+    const test_step = addTestStep(b, "hello-c", opts);
 
     const exe = addExecutable(b, opts, .{ .name = "main", .c_source_bytes = 
     \\#include <stdio.h>
@@ -604,7 +666,7 @@ fn testHelloC(b: *Build, opts: Options) *Step {
 }
 
 fn testHelloZig(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-hello-zig", opts);
+    const test_step = addTestStep(b, "hello-zig", opts);
 
     const exe = addExecutable(b, opts, .{ .name = "main", .zig_source_bytes = 
     \\const std = @import("std");
@@ -621,7 +683,7 @@ fn testHelloZig(b: *Build, opts: Options) *Step {
 }
 
 fn testLargeBss(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-large-bss", opts);
+    const test_step = addTestStep(b, "large-bss", opts);
 
     // TODO this test used use a 4GB zerofill section but this actually fails and causes every
     // linker I tried misbehave in different ways. This only happened on arm64. I thought that
@@ -642,7 +704,7 @@ fn testLargeBss(b: *Build, opts: Options) *Step {
 }
 
 fn testLayout(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-layout", opts);
+    const test_step = addTestStep(b, "layout", opts);
 
     const exe = addExecutable(b, opts, .{ .name = "main", .c_source_bytes = 
     \\#include <stdio.h>
@@ -761,7 +823,7 @@ fn testLayout(b: *Build, opts: Options) *Step {
 }
 
 fn testLinkDirectlyCppTbd(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-link-directly-cpp-tbd", opts);
+    const test_step = addTestStep(b, "link-directly-cpp-tbd", opts);
 
     const sdk = std.zig.system.darwin.getSdk(b.allocator, opts.target.result) orelse
         @panic("macOS SDK is required to run the test");
@@ -780,9 +842,9 @@ fn testLinkDirectlyCppTbd(b: *Build, opts: Options) *Step {
         ,
         .cpp_source_flags = &.{ "-nostdlib++", "-nostdinc++" },
     });
-    exe.root_module.addSystemIncludePath(.{ .path = b.pathJoin(&.{ sdk, "/usr/include" }) });
-    exe.root_module.addIncludePath(.{ .path = b.pathJoin(&.{ sdk, "/usr/include/c++/v1" }) });
-    exe.root_module.addObjectFile(.{ .path = b.pathJoin(&.{ sdk, "/usr/lib/libc++.tbd" }) });
+    exe.root_module.addSystemIncludePath(.{ .cwd_relative = b.pathJoin(&.{ sdk, "/usr/include" }) });
+    exe.root_module.addIncludePath(.{ .cwd_relative = b.pathJoin(&.{ sdk, "/usr/include/c++/v1" }) });
+    exe.root_module.addObjectFile(.{ .cwd_relative = b.pathJoin(&.{ sdk, "/usr/lib/libc++.tbd" }) });
 
     const check = exe.checkObject();
     check.checkInSymtab();
@@ -792,8 +854,47 @@ fn testLinkDirectlyCppTbd(b: *Build, opts: Options) *Step {
     return test_step;
 }
 
+fn testLinkingStaticLib(b: *Build, opts: Options) *Step {
+    const test_step = addTestStep(b, "linking-static-lib", opts);
+
+    const obj = addObject(b, opts, .{
+        .name = "bobj",
+        .zig_source_bytes = "export var bar: i32 = -42;",
+        .strip = true, // TODO for self-hosted, we don't really emit any valid DWARF yet since we only export a global
+    });
+
+    const lib = addStaticLibrary(b, opts, .{
+        .name = "alib",
+        .zig_source_bytes =
+        \\export fn foo() i32 {
+        \\    return 42;
+        \\}
+        ,
+    });
+    lib.addObject(obj);
+
+    const exe = addExecutable(b, opts, .{
+        .name = "testlib",
+        .zig_source_bytes =
+        \\const std = @import("std");
+        \\extern fn foo() i32;
+        \\extern var bar: i32;
+        \\pub fn main() void {
+        \\    std.debug.print("{d}\n", .{foo() + bar});
+        \\}
+        ,
+    });
+    exe.linkLibrary(lib);
+
+    const run = addRunArtifact(exe);
+    run.expectStdErrEqual("0\n");
+    test_step.dependOn(&run.step);
+
+    return test_step;
+}
+
 fn testLinksection(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-linksection", opts);
+    const test_step = addTestStep(b, "linksection", opts);
 
     const obj = addObject(b, opts, .{ .name = "main", .zig_source_bytes = 
     \\export var test_global: u32 linksection("__DATA,__TestGlobal") = undefined;
@@ -819,8 +920,487 @@ fn testLinksection(b: *Build, opts: Options) *Step {
     return test_step;
 }
 
+fn testMergeLiteralsX64(b: *Build, opts: Options) *Step {
+    const test_step = addTestStep(b, "merge-literals-x64", opts);
+
+    const a_o = addObject(b, opts, .{ .name = "a", .asm_source_bytes = 
+    \\.globl _q1
+    \\.globl _s1
+    \\
+    \\.align 4
+    \\_q1:
+    \\  lea L._q1(%rip), %rax
+    \\  mov (%rax), %xmm0
+    \\  ret
+    \\ 
+    \\.section __TEXT,__cstring,cstring_literals
+    \\l._s1:
+    \\  .asciz "hello"
+    \\
+    \\.section __TEXT,__literal8,8byte_literals
+    \\.align 8
+    \\L._q1:
+    \\  .double 1.2345
+    \\
+    \\.section __DATA,__data
+    \\.align 8
+    \\_s1:
+    \\  .quad l._s1
+    });
+
+    const b_o = addObject(b, opts, .{ .name = "b", .asm_source_bytes = 
+    \\.globl _q2
+    \\.globl _s2
+    \\.globl _s3
+    \\
+    \\.align 4
+    \\_q2:
+    \\  lea L._q2(%rip), %rax
+    \\  mov (%rax), %xmm0
+    \\  ret
+    \\ 
+    \\.section __TEXT,__cstring,cstring_literals
+    \\l._s2:
+    \\  .asciz "hello"
+    \\l._s3:
+    \\  .asciz "world"
+    \\
+    \\.section __TEXT,__literal8,8byte_literals
+    \\.align 8
+    \\L._q2:
+    \\  .double 1.2345
+    \\
+    \\.section __DATA,__data
+    \\.align 8
+    \\_s2:
+    \\   .quad l._s2
+    \\_s3:
+    \\   .quad l._s3
+    });
+
+    const main_o = addObject(b, opts, .{ .name = "main", .c_source_bytes = 
+    \\#include <stdio.h>
+    \\extern double q1();
+    \\extern double q2();
+    \\extern const char* s1;
+    \\extern const char* s2;
+    \\extern const char* s3;
+    \\int main() {
+    \\  printf("%s, %s, %s, %f, %f", s1, s2, s3, q1(), q2());
+    \\  return 0;
+    \\}
+    });
+
+    const runWithChecks = struct {
+        fn runWithChecks(step: *Step, exe: *Compile) void {
+            const run = addRunArtifact(exe);
+            run.expectStdOutEqual("hello, hello, world, 1.234500, 1.234500");
+            step.dependOn(&run.step);
+
+            const check = exe.checkObject();
+            check.dumpSection("__TEXT,__const");
+            check.checkContains("\x8d\x97n\x12\x83\xc0\xf3?");
+            check.dumpSection("__TEXT,__cstring");
+            check.checkContains("hello\x00world\x00%s, %s, %s, %f, %f\x00");
+            step.dependOn(&check.step);
+        }
+    }.runWithChecks;
+
+    {
+        const exe = addExecutable(b, opts, .{ .name = "main1" });
+        exe.addObject(a_o);
+        exe.addObject(b_o);
+        exe.addObject(main_o);
+        runWithChecks(test_step, exe);
+    }
+
+    {
+        const exe = addExecutable(b, opts, .{ .name = "main2" });
+        exe.addObject(b_o);
+        exe.addObject(a_o);
+        exe.addObject(main_o);
+        runWithChecks(test_step, exe);
+    }
+
+    {
+        const c_o = addObject(b, opts, .{ .name = "c" });
+        c_o.addObject(a_o);
+        c_o.addObject(b_o);
+        c_o.addObject(main_o);
+
+        const exe = addExecutable(b, opts, .{ .name = "main3" });
+        exe.addObject(c_o);
+        runWithChecks(test_step, exe);
+    }
+
+    return test_step;
+}
+
+fn testMergeLiteralsArm64(b: *Build, opts: Options) *Step {
+    const test_step = addTestStep(b, "merge-literals-arm64", opts);
+
+    const a_o = addObject(b, opts, .{ .name = "a", .asm_source_bytes = 
+    \\.globl _q1
+    \\.globl _s1
+    \\
+    \\.align 4
+    \\_q1:
+    \\  adrp x8, L._q1@PAGE
+    \\  ldr d0, [x8, L._q1@PAGEOFF]
+    \\  ret
+    \\ 
+    \\.section __TEXT,__cstring,cstring_literals
+    \\l._s1:
+    \\  .asciz "hello"
+    \\
+    \\.section __TEXT,__literal8,8byte_literals
+    \\.align 8
+    \\L._q1:
+    \\  .double 1.2345
+    \\
+    \\.section __DATA,__data
+    \\.align 8
+    \\_s1:
+    \\  .quad l._s1
+    });
+
+    const b_o = addObject(b, opts, .{ .name = "b", .asm_source_bytes = 
+    \\.globl _q2
+    \\.globl _s2
+    \\.globl _s3
+    \\
+    \\.align 4
+    \\_q2:
+    \\  adrp x8, L._q2@PAGE
+    \\  ldr d0, [x8, L._q2@PAGEOFF]
+    \\  ret
+    \\ 
+    \\.section __TEXT,__cstring,cstring_literals
+    \\l._s2:
+    \\  .asciz "hello"
+    \\l._s3:
+    \\  .asciz "world"
+    \\
+    \\.section __TEXT,__literal8,8byte_literals
+    \\.align 8
+    \\L._q2:
+    \\  .double 1.2345
+    \\
+    \\.section __DATA,__data
+    \\.align 8
+    \\_s2:
+    \\   .quad l._s2
+    \\_s3:
+    \\   .quad l._s3
+    });
+
+    const main_o = addObject(b, opts, .{ .name = "main", .c_source_bytes = 
+    \\#include <stdio.h>
+    \\extern double q1();
+    \\extern double q2();
+    \\extern const char* s1;
+    \\extern const char* s2;
+    \\extern const char* s3;
+    \\int main() {
+    \\  printf("%s, %s, %s, %f, %f", s1, s2, s3, q1(), q2());
+    \\  return 0;
+    \\}
+    });
+
+    const runWithChecks = struct {
+        fn runWithChecks(step: *Step, exe: *Compile) void {
+            const run = addRunArtifact(exe);
+            run.expectStdOutEqual("hello, hello, world, 1.234500, 1.234500");
+            step.dependOn(&run.step);
+
+            const check = exe.checkObject();
+            check.dumpSection("__TEXT,__const");
+            check.checkContains("\x8d\x97n\x12\x83\xc0\xf3?");
+            check.dumpSection("__TEXT,__cstring");
+            check.checkContains("hello\x00world\x00%s, %s, %s, %f, %f\x00");
+            step.dependOn(&check.step);
+        }
+    }.runWithChecks;
+
+    {
+        const exe = addExecutable(b, opts, .{ .name = "main1" });
+        exe.addObject(a_o);
+        exe.addObject(b_o);
+        exe.addObject(main_o);
+        runWithChecks(test_step, exe);
+    }
+
+    {
+        const exe = addExecutable(b, opts, .{ .name = "main2" });
+        exe.addObject(b_o);
+        exe.addObject(a_o);
+        exe.addObject(main_o);
+        runWithChecks(test_step, exe);
+    }
+
+    {
+        const c_o = addObject(b, opts, .{ .name = "c" });
+        c_o.addObject(a_o);
+        c_o.addObject(b_o);
+        c_o.addObject(main_o);
+
+        const exe = addExecutable(b, opts, .{ .name = "main3" });
+        exe.addObject(c_o);
+        runWithChecks(test_step, exe);
+    }
+
+    return test_step;
+}
+
+/// This particular test case will generate invalid machine code that will segfault at runtime.
+/// However, this is by design as we want to test that the linker does not panic when linking it
+/// which is also the case for the system linker and lld - linking succeeds, runtime segfaults.
+/// It should also be mentioned that runtime segfault is not due to the linker but faulty input asm.
+fn testMergeLiteralsArm642(b: *Build, opts: Options) *Step {
+    const test_step = addTestStep(b, "merge-literals-arm64-2", opts);
+
+    const a_o = addObject(b, opts, .{ .name = "a", .asm_source_bytes = 
+    \\.globl _q1
+    \\.globl _s1
+    \\
+    \\.align 4
+    \\_q1:
+    \\  adrp x0, L._q1@PAGE
+    \\  ldr x0, [x0, L._q1@PAGEOFF]
+    \\  ret
+    \\ 
+    \\.section __TEXT,__cstring,cstring_literals
+    \\_s1:
+    \\  .asciz "hello"
+    \\
+    \\.section __TEXT,__literal8,8byte_literals
+    \\.align 8
+    \\L._q1:
+    \\  .double 1.2345
+    });
+
+    const b_o = addObject(b, opts, .{ .name = "b", .asm_source_bytes = 
+    \\.globl _q2
+    \\.globl _s2
+    \\.globl _s3
+    \\
+    \\.align 4
+    \\_q2:
+    \\  adrp x0, L._q2@PAGE
+    \\  ldr x0, [x0, L._q2@PAGEOFF]
+    \\  ret
+    \\ 
+    \\.section __TEXT,__cstring,cstring_literals
+    \\_s2:
+    \\  .asciz "hello"
+    \\_s3:
+    \\  .asciz "world"
+    \\
+    \\.section __TEXT,__literal8,8byte_literals
+    \\.align 8
+    \\L._q2:
+    \\  .double 1.2345
+    });
+
+    const main_o = addObject(b, opts, .{ .name = "main", .c_source_bytes = 
+    \\#include <stdio.h>
+    \\extern double q1();
+    \\extern double q2();
+    \\extern const char* s1;
+    \\extern const char* s2;
+    \\extern const char* s3;
+    \\int main() {
+    \\  printf("%s, %s, %s, %f, %f", s1, s2, s3, q1(), q2());
+    \\  return 0;
+    \\}
+    });
+
+    const exe = addExecutable(b, opts, .{ .name = "main1" });
+    exe.addObject(a_o);
+    exe.addObject(b_o);
+    exe.addObject(main_o);
+
+    const check = exe.checkObject();
+    check.dumpSection("__TEXT,__const");
+    check.checkContains("\x8d\x97n\x12\x83\xc0\xf3?");
+    check.dumpSection("__TEXT,__cstring");
+    check.checkContains("hello\x00world\x00%s, %s, %s, %f, %f\x00");
+    test_step.dependOn(&check.step);
+
+    return test_step;
+}
+
+fn testMergeLiteralsAlignment(b: *Build, opts: Options) *Step {
+    const test_step = addTestStep(b, "merge-literals-alignment", opts);
+
+    const a_o = addObject(b, opts, .{ .name = "a", .asm_source_bytes = 
+    \\.globl _s1
+    \\.globl _s2
+    \\
+    \\.section __TEXT,__cstring,cstring_literals
+    \\.align 3
+    \\_s1:
+    \\  .asciz "str1"
+    \\_s2:
+    \\  .asciz "str2"
+    });
+
+    const b_o = addObject(b, opts, .{ .name = "b", .asm_source_bytes = 
+    \\.globl _s3
+    \\.globl _s4
+    \\
+    \\.section __TEXT,__cstring,cstring_literals
+    \\.align 2
+    \\_s3:
+    \\  .asciz "str1"
+    \\_s4:
+    \\  .asciz "str2"
+    });
+
+    const main_o = addObject(b, opts, .{ .name = "main", .c_source_bytes = 
+    \\#include <assert.h>
+    \\#include <stdint.h>
+    \\#include <stdio.h>
+    \\extern const char* s1;
+    \\extern const char* s2;
+    \\extern const char* s3;
+    \\extern const char* s4;
+    \\int main() {
+    \\  assert((uintptr_t)(&s1) % 8 == 0 && s1 == s3);
+    \\  assert((uintptr_t)(&s2) % 8 == 0 && s2 == s4);
+    \\  printf("%s%s%s%s", &s1, &s2, &s3, &s4);
+    \\  return 0;
+    \\}
+    , .c_source_flags = &.{"-Wno-format"} });
+
+    const runWithChecks = struct {
+        fn runWithChecks(step: *Step, exe: *Compile) void {
+            const run = addRunArtifact(exe);
+            run.expectStdOutEqual("str1str2str1str2");
+            step.dependOn(&run.step);
+
+            const check = exe.checkObject();
+            check.dumpSection("__TEXT,__cstring");
+            check.checkContains("str1\x00\x00\x00\x00str2\x00");
+            check.checkInHeaders();
+            check.checkExact("segname __TEXT");
+            check.checkExact("sectname __cstring");
+            check.checkExact("align 3");
+            step.dependOn(&check.step);
+        }
+    }.runWithChecks;
+
+    {
+        const exe = addExecutable(b, opts, .{ .name = "main1" });
+        exe.addObject(a_o);
+        exe.addObject(b_o);
+        exe.addObject(main_o);
+        runWithChecks(test_step, exe);
+    }
+
+    {
+        const exe = addExecutable(b, opts, .{ .name = "main2" });
+        exe.addObject(b_o);
+        exe.addObject(a_o);
+        exe.addObject(main_o);
+        runWithChecks(test_step, exe);
+    }
+
+    return test_step;
+}
+
+fn testMergeLiteralsObjc(b: *Build, opts: Options) *Step {
+    const test_step = addTestStep(b, "merge-literals-objc", opts);
+
+    const main_o = addObject(b, opts, .{ .name = "main", .objc_source_bytes = 
+    \\#import <Foundation/Foundation.h>;
+    \\
+    \\extern void foo();
+    \\
+    \\int main() {
+    \\  NSString *thing = @"aaa";
+    \\
+    \\  SEL sel = @selector(lowercaseString);
+    \\  NSString *lower = (([thing respondsToSelector:sel]) ? @"YES" : @"NO");
+    \\  NSLog (@"Responds to lowercaseString: %@", lower);
+    \\  if ([thing respondsToSelector:sel]) //(lower == @"YES")
+    \\      NSLog(@"lowercaseString is: %@", [thing lowercaseString]);
+    \\
+    \\  foo();
+    \\}
+    });
+
+    const a_o = addObject(b, opts, .{ .name = "a", .objc_source_bytes = 
+    \\#import <Foundation/Foundation.h>;
+    \\
+    \\void foo() {
+    \\  NSString *thing = @"aaa";
+    \\  SEL sel = @selector(lowercaseString);
+    \\  NSString *lower = (([thing respondsToSelector:sel]) ? @"YES" : @"NO");
+    \\  NSLog (@"Responds to lowercaseString in foo(): %@", lower);
+    \\  if ([thing respondsToSelector:sel]) //(lower == @"YES")
+    \\      NSLog(@"lowercaseString in foo() is: %@", [thing lowercaseString]);
+    \\  SEL sel2 = @selector(uppercaseString);
+    \\  NSString *upper = (([thing respondsToSelector:sel2]) ? @"YES" : @"NO");
+    \\  NSLog (@"Responds to uppercaseString in foo(): %@", upper);
+    \\  if ([thing respondsToSelector:sel2]) //(upper == @"YES")
+    \\      NSLog(@"uppercaseString in foo() is: %@", [thing uppercaseString]);
+    \\}
+    });
+
+    const runWithChecks = struct {
+        fn runWithChecks(step: *Step, exe: *Compile) void {
+            const builder = step.owner;
+            const run = addRunArtifact(exe);
+            run.addCheck(.{ .expect_stderr_match = builder.dupe("Responds to lowercaseString: YES") });
+            run.addCheck(.{ .expect_stderr_match = builder.dupe("lowercaseString is: aaa") });
+            run.addCheck(.{ .expect_stderr_match = builder.dupe("Responds to lowercaseString in foo(): YES") });
+            run.addCheck(.{ .expect_stderr_match = builder.dupe("lowercaseString in foo() is: aaa") });
+            run.addCheck(.{ .expect_stderr_match = builder.dupe("Responds to uppercaseString in foo(): YES") });
+            run.addCheck(.{ .expect_stderr_match = builder.dupe("uppercaseString in foo() is: AAA") });
+            step.dependOn(&run.step);
+
+            const check = exe.checkObject();
+            check.dumpSection("__TEXT,__objc_methname");
+            check.checkContains("lowercaseString\x00");
+            check.dumpSection("__TEXT,__objc_methname");
+            check.checkContains("uppercaseString\x00");
+            step.dependOn(&check.step);
+        }
+    }.runWithChecks;
+
+    {
+        const exe = addExecutable(b, opts, .{ .name = "main1" });
+        exe.addObject(main_o);
+        exe.addObject(a_o);
+        exe.root_module.linkFramework("Foundation", .{});
+        runWithChecks(test_step, exe);
+    }
+
+    {
+        const exe = addExecutable(b, opts, .{ .name = "main2" });
+        exe.addObject(a_o);
+        exe.addObject(main_o);
+        exe.root_module.linkFramework("Foundation", .{});
+        runWithChecks(test_step, exe);
+    }
+
+    {
+        const b_o = addObject(b, opts, .{ .name = "b" });
+        b_o.addObject(a_o);
+        b_o.addObject(main_o);
+
+        const exe = addExecutable(b, opts, .{ .name = "main3" });
+        exe.addObject(b_o);
+        exe.root_module.linkFramework("Foundation", .{});
+        runWithChecks(test_step, exe);
+    }
+
+    return test_step;
+}
+
 fn testMhExecuteHeader(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-mh-execute-header", opts);
+    const test_step = addTestStep(b, "mh-execute-header", opts);
 
     const exe = addExecutable(b, opts, .{ .name = "main", .c_source_bytes = "int main() { return 0; }" });
 
@@ -833,7 +1413,7 @@ fn testMhExecuteHeader(b: *Build, opts: Options) *Step {
 }
 
 fn testNoDeadStrip(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-no-dead-strip", opts);
+    const test_step = addTestStep(b, "no-dead-strip", opts);
 
     const exe = addExecutable(b, opts, .{ .name = "name", .c_source_bytes = 
     \\__attribute__((used)) int bogus1 = 0;
@@ -860,7 +1440,7 @@ fn testNoDeadStrip(b: *Build, opts: Options) *Step {
 }
 
 fn testNoExportsDylib(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-no-exports-dylib", opts);
+    const test_step = addTestStep(b, "no-exports-dylib", opts);
 
     const dylib = addSharedLibrary(b, opts, .{ .name = "a", .c_source_bytes = "static void abc() {}" });
 
@@ -873,7 +1453,7 @@ fn testNoExportsDylib(b: *Build, opts: Options) *Step {
 }
 
 fn testNeededFramework(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-needed-framework", opts);
+    const test_step = addTestStep(b, "needed-framework", opts);
 
     const exe = addExecutable(b, opts, .{ .name = "main", .c_source_bytes = "int main() { return 0; }" });
     exe.root_module.linkFramework("Cocoa", .{ .needed = true });
@@ -893,7 +1473,7 @@ fn testNeededFramework(b: *Build, opts: Options) *Step {
 }
 
 fn testNeededLibrary(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-needed-library", opts);
+    const test_step = addTestStep(b, "needed-library", opts);
 
     const dylib = addSharedLibrary(b, opts, .{ .name = "a", .c_source_bytes = "int a = 42;" });
 
@@ -917,7 +1497,7 @@ fn testNeededLibrary(b: *Build, opts: Options) *Step {
 }
 
 fn testObjc(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-objc", opts);
+    const test_step = addTestStep(b, "objc", opts);
 
     const lib = addStaticLibrary(b, opts, .{ .name = "a", .objc_source_bytes = 
     \\#import <Foundation/Foundation.h>
@@ -927,25 +1507,44 @@ fn testObjc(b: *Build, opts: Options) *Step {
     \\@end
     });
 
-    const exe = addExecutable(b, opts, .{ .name = "main", .c_source_bytes = "int main() { return 0; }" });
-    exe.root_module.linkSystemLibrary("a", .{});
-    exe.root_module.linkFramework("Foundation", .{});
-    exe.root_module.addLibraryPath(lib.getEmittedBinDirectory());
+    {
+        const exe = addExecutable(b, opts, .{ .name = "main", .c_source_bytes = "int main() { return 0; }" });
+        exe.root_module.linkSystemLibrary("a", .{});
+        exe.root_module.linkFramework("Foundation", .{});
+        exe.root_module.addLibraryPath(lib.getEmittedBinDirectory());
 
-    const check = exe.checkObject();
-    check.checkInSymtab();
-    check.checkContains("_OBJC_");
-    test_step.dependOn(&check.step);
+        const check = exe.checkObject();
+        check.checkInSymtab();
+        check.checkNotPresent("_OBJC_");
+        test_step.dependOn(&check.step);
 
-    const run = addRunArtifact(exe);
-    run.expectExitCode(0);
-    test_step.dependOn(&run.step);
+        const run = addRunArtifact(exe);
+        run.expectExitCode(0);
+        test_step.dependOn(&run.step);
+    }
+
+    {
+        const exe = addExecutable(b, opts, .{ .name = "main2", .c_source_bytes = "int main() { return 0; }" });
+        exe.root_module.linkSystemLibrary("a", .{});
+        exe.root_module.linkFramework("Foundation", .{});
+        exe.root_module.addLibraryPath(lib.getEmittedBinDirectory());
+        exe.force_load_objc = true;
+
+        const check = exe.checkObject();
+        check.checkInSymtab();
+        check.checkContains("_OBJC_");
+        test_step.dependOn(&check.step);
+
+        const run = addRunArtifact(exe);
+        run.expectExitCode(0);
+        test_step.dependOn(&run.step);
+    }
 
     return test_step;
 }
 
 fn testObjcpp(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-objcpp", opts);
+    const test_step = addTestStep(b, "objcpp", opts);
 
     const foo_h = foo_h: {
         const wf = WriteFile.create(b);
@@ -998,7 +1597,7 @@ fn testObjcpp(b: *Build, opts: Options) *Step {
 }
 
 fn testPagezeroSize(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-pagezero-size", opts);
+    const test_step = addTestStep(b, "pagezero-size", opts);
 
     {
         const exe = addExecutable(b, opts, .{ .name = "main", .c_source_bytes = "int main () { return 0; }" });
@@ -1032,7 +1631,7 @@ fn testPagezeroSize(b: *Build, opts: Options) *Step {
 }
 
 fn testReexportsZig(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-reexports-zig", opts);
+    const test_step = addTestStep(b, "reexports-zig", opts);
 
     const lib = addStaticLibrary(b, opts, .{ .name = "a", .zig_source_bytes = 
     \\const x: i32 = 42;
@@ -1040,7 +1639,7 @@ fn testReexportsZig(b: *Build, opts: Options) *Step {
     \\    return x;
     \\}
     \\comptime {
-    \\    @export(foo, .{ .name = "bar", .linkage = .Strong });
+    \\    @export(foo, .{ .name = "bar", .linkage = .strong });
     \\}
     });
 
@@ -1061,7 +1660,7 @@ fn testReexportsZig(b: *Build, opts: Options) *Step {
 }
 
 fn testRelocatable(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-relocatable", opts);
+    const test_step = addTestStep(b, "relocatable", opts);
 
     const a_o = addObject(b, opts, .{ .name = "a", .cpp_source_bytes = 
     \\#include <stdexcept>
@@ -1129,7 +1728,7 @@ fn testRelocatable(b: *Build, opts: Options) *Step {
 }
 
 fn testRelocatableZig(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-relocatable-zig", opts);
+    const test_step = addTestStep(b, "relocatable-zig", opts);
 
     const a_o = addObject(b, opts, .{ .name = "a", .zig_source_bytes = 
     \\const std = @import("std");
@@ -1180,7 +1779,7 @@ fn testRelocatableZig(b: *Build, opts: Options) *Step {
 }
 
 fn testSearchStrategy(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-search-strategy", opts);
+    const test_step = addTestStep(b, "search-strategy", opts);
 
     const obj = addObject(b, opts, .{ .name = "a", .c_source_bytes = 
     \\#include<stdio.h>
@@ -1248,7 +1847,7 @@ fn testSearchStrategy(b: *Build, opts: Options) *Step {
 }
 
 fn testSectionBoundarySymbols(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-section-boundary-symbols", opts);
+    const test_step = addTestStep(b, "section-boundary-symbols", opts);
 
     const obj1 = addObject(b, opts, .{
         .name = "obj1",
@@ -1328,7 +1927,7 @@ fn testSectionBoundarySymbols(b: *Build, opts: Options) *Step {
 }
 
 fn testSegmentBoundarySymbols(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-segment-boundary-symbols", opts);
+    const test_step = addTestStep(b, "segment-boundary-symbols", opts);
 
     const obj1 = addObject(b, opts, .{ .name = "a", .cpp_source_bytes = 
     \\constexpr const char* MESSAGE __attribute__((used, section("__DATA_CONST_1,__message_ptr"))) = "codebase";
@@ -1395,8 +1994,56 @@ fn testSegmentBoundarySymbols(b: *Build, opts: Options) *Step {
     return test_step;
 }
 
+fn testSymbolStabs(b: *Build, opts: Options) *Step {
+    const test_step = addTestStep(b, "symbol-stabs", opts);
+
+    const a_o = addObject(b, opts, .{ .name = "a", .c_source_bytes = 
+    \\int foo = 42;
+    \\int getFoo() {
+    \\  return foo;
+    \\}
+    });
+
+    const b_o = addObject(b, opts, .{ .name = "b", .c_source_bytes = 
+    \\int bar = 24;
+    \\int getBar() {
+    \\  return bar;
+    \\}
+    });
+
+    const main_o = addObject(b, opts, .{ .name = "main", .c_source_bytes = 
+    \\#include <stdio.h>
+    \\extern int getFoo();
+    \\extern int getBar();
+    \\int main() {
+    \\  printf("foo=%d,bar=%d", getFoo(), getBar());
+    \\  return 0;
+    \\}
+    });
+
+    const exe = addExecutable(b, opts, .{ .name = "main" });
+    exe.addObject(a_o);
+    exe.addObject(b_o);
+    exe.addObject(main_o);
+
+    const run = addRunArtifact(exe);
+    run.expectStdOutEqual("foo=42,bar=24");
+    test_step.dependOn(&run.step);
+
+    const check = exe.checkObject();
+    check.checkInSymtab();
+    check.checkContains("a.o"); // TODO we really should do a fuzzy search like OSO <ignore>/a.o
+    check.checkInSymtab();
+    check.checkContains("b.o");
+    check.checkInSymtab();
+    check.checkContains("main.o");
+    test_step.dependOn(&check.step);
+
+    return test_step;
+}
+
 fn testStackSize(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-stack-size", opts);
+    const test_step = addTestStep(b, "stack-size", opts);
 
     const exe = addExecutable(b, opts, .{ .name = "main", .c_source_bytes = "int main() { return 0; }" });
     exe.stack_size = 0x100000000;
@@ -1415,7 +2062,7 @@ fn testStackSize(b: *Build, opts: Options) *Step {
 }
 
 fn testTbdv3(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-tbdv3", opts);
+    const test_step = addTestStep(b, "tbdv3", opts);
 
     const dylib = addSharedLibrary(b, opts, .{ .name = "a", .c_source_bytes = "int getFoo() { return 42; }" });
 
@@ -1453,7 +2100,7 @@ fn testTbdv3(b: *Build, opts: Options) *Step {
 }
 
 fn testTentative(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-tentative", opts);
+    const test_step = addTestStep(b, "tentative", opts);
 
     const exe = addExecutable(b, opts, .{ .name = "main" });
     addCSourceBytes(exe,
@@ -1479,7 +2126,7 @@ fn testTentative(b: *Build, opts: Options) *Step {
 }
 
 fn testThunks(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-thunks", opts);
+    const test_step = addTestStep(b, "thunks", opts);
 
     const exe = addExecutable(b, opts, .{ .name = "main", .c_source_bytes = 
     \\#include <stdio.h>
@@ -1508,7 +2155,7 @@ fn testThunks(b: *Build, opts: Options) *Step {
 }
 
 fn testTls(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-tls", opts);
+    const test_step = addTestStep(b, "tls", opts);
 
     const dylib = addSharedLibrary(b, opts, .{ .name = "a", .c_source_bytes = 
     \\_Thread_local int a;
@@ -1541,8 +2188,73 @@ fn testTls(b: *Build, opts: Options) *Step {
     return test_step;
 }
 
+// https://github.com/ziglang/zig/issues/19221
+fn testTlsPointers(b: *Build, opts: Options) *Step {
+    const test_step = addTestStep(b, "tls-pointers", opts);
+
+    const foo_h = foo_h: {
+        const wf = WriteFile.create(b);
+        break :foo_h wf.add("foo.h",
+            \\template<typename just4fun>
+            \\struct Foo {
+            \\
+            \\public:
+            \\  static int getVar() {
+            \\  static int thread_local var = 0;
+            \\  ++var;
+            \\  return var;
+            \\}
+            \\};
+        );
+    };
+
+    const bar_o = addObject(b, opts, .{ .name = "bar", .cpp_source_bytes = 
+    \\#include "foo.h"
+    \\int bar() {
+    \\  int v1 = Foo<int>::getVar();
+    \\  return v1;
+    \\}
+    });
+    bar_o.root_module.addIncludePath(foo_h.dirname());
+    bar_o.linkLibCpp();
+
+    const baz_o = addObject(b, opts, .{ .name = "baz", .cpp_source_bytes = 
+    \\#include "foo.h"
+    \\int baz() {
+    \\  int v1 = Foo<unsigned>::getVar();
+    \\  return v1;
+    \\}
+    });
+    baz_o.root_module.addIncludePath(foo_h.dirname());
+    baz_o.linkLibCpp();
+
+    const main_o = addObject(b, opts, .{ .name = "main", .cpp_source_bytes = 
+    \\extern int bar();
+    \\extern int baz();
+    \\int main() {
+    \\  int v1 = bar();
+    \\  int v2 = baz();
+    \\  return v1 != v2;
+    \\}
+    });
+    main_o.root_module.addIncludePath(foo_h.dirname());
+    main_o.linkLibCpp();
+
+    const exe = addExecutable(b, opts, .{ .name = "main" });
+    exe.addObject(bar_o);
+    exe.addObject(baz_o);
+    exe.addObject(main_o);
+    exe.linkLibCpp();
+
+    const run = addRunArtifact(exe);
+    run.expectExitCode(0);
+    test_step.dependOn(&run.step);
+
+    return test_step;
+}
+
 fn testTlsLargeTbss(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-tls-large-tbss", opts);
+    const test_step = addTestStep(b, "tls-large-tbss", opts);
 
     const exe = addExecutable(b, opts, .{ .name = "main", .c_source_bytes = 
     \\#include <stdio.h>
@@ -1563,7 +2275,7 @@ fn testTlsLargeTbss(b: *Build, opts: Options) *Step {
 }
 
 fn testTwoLevelNamespace(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-two-level-namespace", opts);
+    const test_step = addTestStep(b, "two-level-namespace", opts);
 
     const liba = addSharedLibrary(b, opts, .{ .name = "a", .c_source_bytes = 
     \\#include <stdio.h>
@@ -1683,7 +2395,7 @@ fn testTwoLevelNamespace(b: *Build, opts: Options) *Step {
 }
 
 fn testUndefinedFlag(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-undefined-flag", opts);
+    const test_step = addTestStep(b, "undefined-flag", opts);
 
     const obj = addObject(b, opts, .{ .name = "a", .c_source_bytes = "int foo = 42;" });
 
@@ -1760,7 +2472,7 @@ fn testUndefinedFlag(b: *Build, opts: Options) *Step {
 }
 
 fn testUnwindInfo(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-unwind-info", opts);
+    const test_step = addTestStep(b, "unwind-info", opts);
 
     const all_h = all_h: {
         const wf = WriteFile.create(b);
@@ -1918,7 +2630,7 @@ fn testUnwindInfo(b: *Build, opts: Options) *Step {
 }
 
 fn testUnwindInfoNoSubsectionsArm64(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-unwind-info-no-subsections-arm64", opts);
+    const test_step = addTestStep(b, "unwind-info-no-subsections-arm64", opts);
 
     const a_o = addObject(b, opts, .{ .name = "a", .asm_source_bytes = 
     \\.globl _foo
@@ -1978,7 +2690,7 @@ fn testUnwindInfoNoSubsectionsArm64(b: *Build, opts: Options) *Step {
 }
 
 fn testUnwindInfoNoSubsectionsX64(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-unwind-info-no-subsections-x64", opts);
+    const test_step = addTestStep(b, "unwind-info-no-subsections-x64", opts);
 
     const a_o = addObject(b, opts, .{ .name = "a", .asm_source_bytes = 
     \\.globl _foo
@@ -2031,7 +2743,7 @@ fn testUnwindInfoNoSubsectionsX64(b: *Build, opts: Options) *Step {
 
 // Adapted from https://github.com/llvm/llvm-project/blob/main/lld/test/MachO/weak-binding.s
 fn testWeakBind(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-weak-bind", opts);
+    const test_step = addTestStep(b, "weak-bind", opts);
 
     const lib = addSharedLibrary(b, opts, .{ .name = "foo", .asm_source_bytes = 
     \\.globl _weak_dysym
@@ -2162,7 +2874,7 @@ fn testWeakBind(b: *Build, opts: Options) *Step {
 }
 
 fn testWeakFramework(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-weak-framework", opts);
+    const test_step = addTestStep(b, "weak-framework", opts);
 
     const exe = addExecutable(b, opts, .{ .name = "main", .c_source_bytes = "int main() { return 0; }" });
     exe.root_module.linkFramework("Cocoa", .{ .weak = true });
@@ -2181,7 +2893,7 @@ fn testWeakFramework(b: *Build, opts: Options) *Step {
 }
 
 fn testWeakLibrary(b: *Build, opts: Options) *Step {
-    const test_step = addTestStep(b, "macho-weak-library", opts);
+    const test_step = addTestStep(b, "weak-library", opts);
 
     const dylib = addSharedLibrary(b, opts, .{ .name = "a", .c_source_bytes = 
     \\#include<stdio.h>
@@ -2223,10 +2935,30 @@ fn testWeakLibrary(b: *Build, opts: Options) *Step {
     return test_step;
 }
 
-fn addTestStep(b: *Build, comptime prefix: []const u8, opts: Options) *Step {
-    return link.addTestStep(b, "macho-" ++ prefix, opts);
+fn testWeakRef(b: *Build, opts: Options) *Step {
+    const test_step = addTestStep(b, "weak-ref", opts);
+
+    const exe = addExecutable(b, opts, .{ .name = "main", .c_source_bytes = 
+    \\#include <stdio.h>
+    \\#include <sys/_types/_fd_def.h>
+    \\int main(int argc, char** argv) {
+    \\    printf("__darwin_check_fd_set_overflow: %p\n", __darwin_check_fd_set_overflow);
+    \\}
+    });
+
+    const check = exe.checkObject();
+    check.checkInSymtab();
+    check.checkExact("(undefined) weakref external ___darwin_check_fd_set_overflow (from libSystem.B)");
+    test_step.dependOn(&check.step);
+
+    return test_step;
 }
 
+fn addTestStep(b: *Build, comptime prefix: []const u8, opts: Options) *Step {
+    return link.addTestStep(b, "" ++ prefix, opts);
+}
+
+const builtin = @import("builtin");
 const addAsmSourceBytes = link.addAsmSourceBytes;
 const addCSourceBytes = link.addCSourceBytes;
 const addRunArtifact = link.addRunArtifact;

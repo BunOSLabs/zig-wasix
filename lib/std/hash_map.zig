@@ -92,27 +92,24 @@ pub fn hashString(s: []const u8) u64 {
 pub const StringIndexContext = struct {
     bytes: *const std.ArrayListUnmanaged(u8),
 
-    pub fn eql(self: @This(), a: u32, b: u32) bool {
-        _ = self;
+    pub fn eql(_: @This(), a: u32, b: u32) bool {
         return a == b;
     }
 
-    pub fn hash(self: @This(), x: u32) u64 {
-        const x_slice = mem.sliceTo(@as([*:0]const u8, @ptrCast(self.bytes.items.ptr)) + x, 0);
-        return hashString(x_slice);
+    pub fn hash(ctx: @This(), key: u32) u64 {
+        return hashString(mem.sliceTo(ctx.bytes.items[key..], 0));
     }
 };
 
 pub const StringIndexAdapter = struct {
     bytes: *const std.ArrayListUnmanaged(u8),
 
-    pub fn eql(self: @This(), a_slice: []const u8, b: u32) bool {
-        const b_slice = mem.sliceTo(@as([*:0]const u8, @ptrCast(self.bytes.items.ptr)) + b, 0);
-        return mem.eql(u8, a_slice, b_slice);
+    pub fn eql(ctx: @This(), a: []const u8, b: u32) bool {
+        return mem.eql(u8, a, mem.sliceTo(ctx.bytes.items[b..], 0));
     }
 
-    pub fn hash(self: @This(), adapted_key: []const u8) u64 {
-        _ = self;
+    pub fn hash(_: @This(), adapted_key: []const u8) u64 {
+        assert(mem.indexOfScalar(u8, adapted_key, 0) == null);
         return hashString(adapted_key);
     }
 };
@@ -419,6 +416,23 @@ pub fn HashMap(
             };
         }
 
+        /// Puts the hash map into a state where any method call that would
+        /// cause an existing key or value pointer to become invalidated will
+        /// instead trigger an assertion.
+        ///
+        /// An additional call to `lockPointers` in such state also triggers an
+        /// assertion.
+        ///
+        /// `unlockPointers` returns the hash map to the previous state.
+        pub fn lockPointers(self: *Self) void {
+            self.unmanaged.lockPointers();
+        }
+
+        /// Undoes a call to `lockPointers`.
+        pub fn unlockPointers(self: *Self) void {
+            self.unmanaged.unlockPointers();
+        }
+
         /// Release the backing array and invalidate this map.
         /// This does *not* deinit keys, values, or the context!
         /// If your keys or values need to be released, ensure
@@ -457,13 +471,13 @@ pub fn HashMap(
 
         /// Create an iterator over the keys in the map.
         /// The iterator is invalidated if the map is modified.
-        pub fn keyIterator(self: *const Self) KeyIterator {
+        pub fn keyIterator(self: Self) KeyIterator {
             return self.unmanaged.keyIterator();
         }
 
         /// Create an iterator over the values in the map.
         /// The iterator is invalidated if the map is modified.
-        pub fn valueIterator(self: *const Self) ValueIterator {
+        pub fn valueIterator(self: Self) ValueIterator {
             return self.unmanaged.valueIterator();
         }
 
@@ -528,7 +542,7 @@ pub fn HashMap(
 
         /// Returns the number of total elements which may be present before it is
         /// no longer guaranteed that no allocations will be performed.
-        pub fn capacity(self: *Self) Size {
+        pub fn capacity(self: Self) Size {
             return self.unmanaged.capacity();
         }
 
@@ -675,6 +689,7 @@ pub fn HashMap(
         /// Set the map to an empty state, making deinitialization a no-op, and
         /// returning a copy of the original.
         pub fn move(self: *Self) Self {
+            self.unmanaged.pointer_stability.assertUnlocked();
             const result = self.*;
             self.unmanaged = .{};
             return result;
@@ -724,6 +739,9 @@ pub fn HashMapUnmanaged(
         /// Number of available slots before a grow is needed to satisfy the
         /// `max_load_percentage`.
         available: Size = 0,
+
+        /// Used to detect memory safety violations.
+        pointer_stability: std.debug.SafetyLock = .{},
 
         // This is purely empirical and not a /very smart magic constant™/.
         /// Capacity of the first grow when bootstrapping the hashmap.
@@ -887,17 +905,35 @@ pub fn HashMapUnmanaged(
             };
         }
 
+        /// Puts the hash map into a state where any method call that would
+        /// cause an existing key or value pointer to become invalidated will
+        /// instead trigger an assertion.
+        ///
+        /// An additional call to `lockPointers` in such state also triggers an
+        /// assertion.
+        ///
+        /// `unlockPointers` returns the hash map to the previous state.
+        pub fn lockPointers(self: *Self) void {
+            self.pointer_stability.lock();
+        }
+
+        /// Undoes a call to `lockPointers`.
+        pub fn unlockPointers(self: *Self) void {
+            self.pointer_stability.unlock();
+        }
+
         fn isUnderMaxLoadPercentage(size: Size, cap: Size) bool {
             return size * 100 < max_load_percentage * cap;
         }
 
         pub fn deinit(self: *Self, allocator: Allocator) void {
+            self.pointer_stability.assertUnlocked();
             self.deallocate(allocator);
             self.* = undefined;
         }
 
         fn capacityForSize(size: Size) Size {
-            var new_cap: u32 = @truncate((@as(u64, size) * 100) / max_load_percentage + 1);
+            var new_cap: u32 = @intCast((@as(u64, size) * 100) / max_load_percentage + 1);
             new_cap = math.ceilPowerOfTwo(u32, new_cap) catch unreachable;
             return new_cap;
         }
@@ -908,6 +944,8 @@ pub fn HashMapUnmanaged(
             return ensureTotalCapacityContext(self, allocator, new_size, undefined);
         }
         pub fn ensureTotalCapacityContext(self: *Self, allocator: Allocator, new_size: Size, ctx: Context) Allocator.Error!void {
+            self.pointer_stability.lock();
+            defer self.pointer_stability.unlock();
             if (new_size > self.size)
                 try self.growIfNeeded(allocator, new_size - self.size, ctx);
         }
@@ -922,36 +960,40 @@ pub fn HashMapUnmanaged(
         }
 
         pub fn clearRetainingCapacity(self: *Self) void {
+            self.pointer_stability.lock();
+            defer self.pointer_stability.unlock();
             if (self.metadata) |_| {
                 self.initMetadatas();
                 self.size = 0;
-                self.available = @as(u32, @truncate((self.capacity() * max_load_percentage) / 100));
+                self.available = @truncate((self.capacity() * max_load_percentage) / 100);
             }
         }
 
         pub fn clearAndFree(self: *Self, allocator: Allocator) void {
+            self.pointer_stability.lock();
+            defer self.pointer_stability.unlock();
             self.deallocate(allocator);
             self.size = 0;
             self.available = 0;
         }
 
-        pub fn count(self: *const Self) Size {
+        pub fn count(self: Self) Size {
             return self.size;
         }
 
-        fn header(self: *const Self) *Header {
+        fn header(self: Self) *Header {
             return @ptrCast(@as([*]Header, @ptrCast(@alignCast(self.metadata.?))) - 1);
         }
 
-        fn keys(self: *const Self) [*]K {
+        fn keys(self: Self) [*]K {
             return self.header().keys;
         }
 
-        fn values(self: *const Self) [*]V {
+        fn values(self: Self) [*]V {
             return self.header().values;
         }
 
-        pub fn capacity(self: *const Self) Size {
+        pub fn capacity(self: Self) Size {
             if (self.metadata == null) return 0;
 
             return self.header().capacity;
@@ -961,7 +1003,7 @@ pub fn HashMapUnmanaged(
             return .{ .hm = self };
         }
 
-        pub fn keyIterator(self: *const Self) KeyIterator {
+        pub fn keyIterator(self: Self) KeyIterator {
             if (self.metadata) |metadata| {
                 return .{
                     .len = self.capacity(),
@@ -977,7 +1019,7 @@ pub fn HashMapUnmanaged(
             }
         }
 
-        pub fn valueIterator(self: *const Self) ValueIterator {
+        pub fn valueIterator(self: Self) ValueIterator {
             if (self.metadata) |metadata| {
                 return .{
                     .len = self.capacity(),
@@ -1000,9 +1042,11 @@ pub fn HashMapUnmanaged(
             return self.putNoClobberContext(allocator, key, value, undefined);
         }
         pub fn putNoClobberContext(self: *Self, allocator: Allocator, key: K, value: V, ctx: Context) Allocator.Error!void {
-            assert(!self.containsContext(key, ctx));
-            try self.growIfNeeded(allocator, 1, ctx);
-
+            {
+                self.pointer_stability.lock();
+                defer self.pointer_stability.unlock();
+                try self.growIfNeeded(allocator, 1, ctx);
+            }
             self.putAssumeCapacityNoClobberContext(key, value, ctx);
         }
 
@@ -1031,7 +1075,7 @@ pub fn HashMapUnmanaged(
 
             const hash = ctx.hash(key);
             const mask = self.capacity() - 1;
-            var idx = @as(usize, @truncate(hash & mask));
+            var idx: usize = @truncate(hash & mask);
 
             var metadata = self.metadata.? + idx;
             while (metadata[0].isUsed()) {
@@ -1283,17 +1327,21 @@ pub fn HashMapUnmanaged(
             return self.getOrPutContextAdapted(allocator, key, key_ctx, undefined);
         }
         pub fn getOrPutContextAdapted(self: *Self, allocator: Allocator, key: anytype, key_ctx: anytype, ctx: Context) Allocator.Error!GetOrPutResult {
-            self.growIfNeeded(allocator, 1, ctx) catch |err| {
-                // If allocation fails, try to do the lookup anyway.
-                // If we find an existing item, we can return it.
-                // Otherwise return the error, we could not add another.
-                const index = self.getIndex(key, key_ctx) orelse return err;
-                return GetOrPutResult{
-                    .key_ptr = &self.keys()[index],
-                    .value_ptr = &self.values()[index],
-                    .found_existing = true,
+            {
+                self.pointer_stability.lock();
+                defer self.pointer_stability.unlock();
+                self.growIfNeeded(allocator, 1, ctx) catch |err| {
+                    // If allocation fails, try to do the lookup anyway.
+                    // If we find an existing item, we can return it.
+                    // Otherwise return the error, we could not add another.
+                    const index = self.getIndex(key, key_ctx) orelse return err;
+                    return GetOrPutResult{
+                        .key_ptr = &self.keys()[index],
+                        .value_ptr = &self.values()[index],
+                        .found_existing = true,
+                    };
                 };
-            };
+            }
             return self.getOrPutAssumeCapacityAdapted(key, key_ctx);
         }
 
@@ -1391,15 +1439,15 @@ pub fn HashMapUnmanaged(
         }
 
         /// Return true if there is a value associated with key in the map.
-        pub fn contains(self: *const Self, key: K) bool {
+        pub fn contains(self: Self, key: K) bool {
             if (@sizeOf(Context) != 0)
                 @compileError("Cannot infer context " ++ @typeName(Context) ++ ", call containsContext instead.");
             return self.containsContext(key, undefined);
         }
-        pub fn containsContext(self: *const Self, key: K, ctx: Context) bool {
+        pub fn containsContext(self: Self, key: K, ctx: Context) bool {
             return self.containsAdapted(key, ctx);
         }
-        pub fn containsAdapted(self: *const Self, key: anytype, ctx: anytype) bool {
+        pub fn containsAdapted(self: Self, key: anytype, ctx: anytype) bool {
             return self.getIndex(key, ctx) != null;
         }
 
@@ -1453,7 +1501,7 @@ pub fn HashMapUnmanaged(
 
         // This counts the number of occupied slots (not counting tombstones), which is
         // what has to stay under the max_load_percentage of capacity.
-        fn load(self: *const Self) Size {
+        fn load(self: Self) Size {
             const max_load = (self.capacity() * max_load_percentage) / 100;
             assert(max_load >= self.available);
             return @as(Size, @truncate(max_load - self.available));
@@ -1498,6 +1546,7 @@ pub fn HashMapUnmanaged(
         /// Set the map to an empty state, making deinitialization a no-op, and
         /// returning a copy of the original.
         pub fn move(self: *Self) Self {
+            self.pointer_stability.assertUnlocked();
             const result = self.*;
             self.* = .{};
             return result;
@@ -1509,29 +1558,30 @@ pub fn HashMapUnmanaged(
             assert(new_cap > self.capacity());
             assert(std.math.isPowerOfTwo(new_cap));
 
-            var map = Self{};
-            defer map.deinit(allocator);
+            var map: Self = .{};
             try map.allocate(allocator, new_cap);
+            errdefer comptime unreachable;
+            map.pointer_stability.lock();
             map.initMetadatas();
             map.available = @truncate((new_cap * max_load_percentage) / 100);
 
             if (self.size != 0) {
                 const old_capacity = self.capacity();
-                var i: Size = 0;
-                var metadata = self.metadata.?;
-                const keys_ptr = self.keys();
-                const values_ptr = self.values();
-                while (i < old_capacity) : (i += 1) {
-                    if (metadata[i].isUsed()) {
-                        map.putAssumeCapacityNoClobberContext(keys_ptr[i], values_ptr[i], ctx);
-                        if (map.size == self.size)
-                            break;
-                    }
+                for (
+                    self.metadata.?[0..old_capacity],
+                    self.keys()[0..old_capacity],
+                    self.values()[0..old_capacity],
+                ) |m, k, v| {
+                    if (!m.isUsed()) continue;
+                    map.putAssumeCapacityNoClobberContext(k, v, ctx);
+                    if (map.size == self.size) break;
                 }
             }
 
             self.size = 0;
+            self.pointer_stability = .{ .state = .unlocked };
             std.mem.swap(Self, self, &map);
+            map.deinit(allocator);
         }
 
         fn allocate(self: *Self, allocator: Allocator, new_capacity: Size) Allocator.Error!void {
@@ -1540,31 +1590,32 @@ pub fn HashMapUnmanaged(
             const val_align = if (@sizeOf(V) == 0) 1 else @alignOf(V);
             const max_align = comptime @max(header_align, key_align, val_align);
 
-            const meta_size = @sizeOf(Header) + new_capacity * @sizeOf(Metadata);
+            const new_cap: usize = new_capacity;
+            const meta_size = @sizeOf(Header) + new_cap * @sizeOf(Metadata);
             comptime assert(@alignOf(Metadata) == 1);
 
             const keys_start = std.mem.alignForward(usize, meta_size, key_align);
-            const keys_end = keys_start + new_capacity * @sizeOf(K);
+            const keys_end = keys_start + new_cap * @sizeOf(K);
 
             const vals_start = std.mem.alignForward(usize, keys_end, val_align);
-            const vals_end = vals_start + new_capacity * @sizeOf(V);
+            const vals_end = vals_start + new_cap * @sizeOf(V);
 
             const total_size = std.mem.alignForward(usize, vals_end, max_align);
 
             const slice = try allocator.alignedAlloc(u8, max_align, total_size);
-            const ptr = @intFromPtr(slice.ptr);
+            const ptr: [*]u8 = @ptrCast(slice.ptr);
 
             const metadata = ptr + @sizeOf(Header);
 
-            const hdr = @as(*Header, @ptrFromInt(ptr));
+            const hdr = @as(*Header, @ptrCast(@alignCast(ptr)));
             if (@sizeOf([*]V) != 0) {
-                hdr.values = @as([*]V, @ptrFromInt(ptr + vals_start));
+                hdr.values = @ptrCast(@alignCast((ptr + vals_start)));
             }
             if (@sizeOf([*]K) != 0) {
-                hdr.keys = @as([*]K, @ptrFromInt(ptr + keys_start));
+                hdr.keys = @ptrCast(@alignCast((ptr + keys_start)));
             }
             hdr.capacity = new_capacity;
-            self.metadata = @as([*]Metadata, @ptrFromInt(metadata));
+            self.metadata = @ptrCast(@alignCast(metadata));
         }
 
         fn deallocate(self: *Self, allocator: Allocator) void {
@@ -1575,7 +1626,7 @@ pub fn HashMapUnmanaged(
             const val_align = if (@sizeOf(V) == 0) 1 else @alignOf(V);
             const max_align = comptime @max(header_align, key_align, val_align);
 
-            const cap = self.capacity();
+            const cap: usize = self.capacity();
             const meta_size = @sizeOf(Header) + cap * @sizeOf(Metadata);
             comptime assert(@alignOf(Metadata) == 1);
 
@@ -1587,7 +1638,7 @@ pub fn HashMapUnmanaged(
 
             const total_size = std.mem.alignForward(usize, vals_end, max_align);
 
-            const slice = @as([*]align(max_align) u8, @ptrFromInt(@intFromPtr(self.header())))[0..total_size];
+            const slice = @as([*]align(max_align) u8, @alignCast(@ptrCast(self.header())))[0..total_size];
             allocator.free(slice);
 
             self.metadata = null;
@@ -1603,7 +1654,7 @@ pub fn HashMapUnmanaged(
         }
 
         comptime {
-            if (builtin.mode == .Debug) {
+            if (!builtin.strip_debug_info) {
                 _ = &dbHelper;
             }
         }
@@ -1614,7 +1665,7 @@ const testing = std.testing;
 const expect = std.testing.expect;
 const expectEqual = std.testing.expectEqual;
 
-test "std.hash_map basic usage" {
+test "basic usage" {
     var map = AutoHashMap(u32, u32).init(std.testing.allocator);
     defer map.deinit();
 
@@ -1642,7 +1693,7 @@ test "std.hash_map basic usage" {
     try expectEqual(total, sum);
 }
 
-test "std.hash_map ensureTotalCapacity" {
+test "ensureTotalCapacity" {
     var map = AutoHashMap(i32, i32).init(std.testing.allocator);
     defer map.deinit();
 
@@ -1657,7 +1708,7 @@ test "std.hash_map ensureTotalCapacity" {
     try testing.expect(initial_capacity == map.capacity());
 }
 
-test "std.hash_map ensureUnusedCapacity with tombstones" {
+test "ensureUnusedCapacity with tombstones" {
     var map = AutoHashMap(i32, i32).init(std.testing.allocator);
     defer map.deinit();
 
@@ -1669,7 +1720,7 @@ test "std.hash_map ensureUnusedCapacity with tombstones" {
     }
 }
 
-test "std.hash_map clearRetainingCapacity" {
+test "clearRetainingCapacity" {
     var map = AutoHashMap(u32, u32).init(std.testing.allocator);
     defer map.deinit();
 
@@ -1694,7 +1745,7 @@ test "std.hash_map clearRetainingCapacity" {
     try expect(!map.contains(1));
 }
 
-test "std.hash_map grow" {
+test "grow" {
     var map = AutoHashMap(u32, u32).init(std.testing.allocator);
     defer map.deinit();
 
@@ -1720,7 +1771,7 @@ test "std.hash_map grow" {
     }
 }
 
-test "std.hash_map clone" {
+test "clone" {
     var map = AutoHashMap(u32, u32).init(std.testing.allocator);
     defer map.deinit();
 
@@ -1758,7 +1809,7 @@ test "std.hash_map clone" {
     }
 }
 
-test "std.hash_map ensureTotalCapacity with existing elements" {
+test "ensureTotalCapacity with existing elements" {
     var map = AutoHashMap(u32, u32).init(std.testing.allocator);
     defer map.deinit();
 
@@ -1771,7 +1822,7 @@ test "std.hash_map ensureTotalCapacity with existing elements" {
     try expectEqual(map.capacity(), 128);
 }
 
-test "std.hash_map ensureTotalCapacity satisfies max load factor" {
+test "ensureTotalCapacity satisfies max load factor" {
     var map = AutoHashMap(u32, u32).init(std.testing.allocator);
     defer map.deinit();
 
@@ -1779,7 +1830,7 @@ test "std.hash_map ensureTotalCapacity satisfies max load factor" {
     try expectEqual(map.capacity(), 256);
 }
 
-test "std.hash_map remove" {
+test "remove" {
     var map = AutoHashMap(u32, u32).init(std.testing.allocator);
     defer map.deinit();
 
@@ -1811,7 +1862,7 @@ test "std.hash_map remove" {
     }
 }
 
-test "std.hash_map reverse removes" {
+test "reverse removes" {
     var map = AutoHashMap(u32, u32).init(std.testing.allocator);
     defer map.deinit();
 
@@ -1833,7 +1884,7 @@ test "std.hash_map reverse removes" {
     try expectEqual(map.count(), 0);
 }
 
-test "std.hash_map multiple removes on same metadata" {
+test "multiple removes on same metadata" {
     var map = AutoHashMap(u32, u32).init(std.testing.allocator);
     defer map.deinit();
 
@@ -1870,7 +1921,7 @@ test "std.hash_map multiple removes on same metadata" {
     }
 }
 
-test "std.hash_map put and remove loop in random order" {
+test "put and remove loop in random order" {
     var map = AutoHashMap(u32, u32).init(std.testing.allocator);
     defer map.deinit();
 
@@ -1884,7 +1935,7 @@ test "std.hash_map put and remove loop in random order" {
     while (i < size) : (i += 1) {
         try keys.append(i);
     }
-    var prng = std.rand.DefaultPrng.init(0);
+    var prng = std.Random.DefaultPrng.init(0);
     const random = prng.random();
 
     while (i < iterations) : (i += 1) {
@@ -1902,7 +1953,7 @@ test "std.hash_map put and remove loop in random order" {
     }
 }
 
-test "std.hash_map remove one million elements in random order" {
+test "remove one million elements in random order" {
     const Map = AutoHashMap(u32, u32);
     const n = 1000 * 1000;
     var map = Map.init(std.heap.page_allocator);
@@ -1916,7 +1967,7 @@ test "std.hash_map remove one million elements in random order" {
         keys.append(i) catch unreachable;
     }
 
-    var prng = std.rand.DefaultPrng.init(0);
+    var prng = std.Random.DefaultPrng.init(0);
     const random = prng.random();
     random.shuffle(u32, keys.items);
 
@@ -1932,7 +1983,7 @@ test "std.hash_map remove one million elements in random order" {
     }
 }
 
-test "std.hash_map put" {
+test "put" {
     var map = AutoHashMap(u32, u32).init(std.testing.allocator);
     defer map.deinit();
 
@@ -1957,7 +2008,7 @@ test "std.hash_map put" {
     }
 }
 
-test "std.hash_map putAssumeCapacity" {
+test "putAssumeCapacity" {
     var map = AutoHashMap(u32, u32).init(std.testing.allocator);
     defer map.deinit();
 
@@ -1987,7 +2038,7 @@ test "std.hash_map putAssumeCapacity" {
     try expectEqual(sum, 20);
 }
 
-test "std.hash_map repeat putAssumeCapacity/remove" {
+test "repeat putAssumeCapacity/remove" {
     var map = AutoHashMap(u32, u32).init(std.testing.allocator);
     defer map.deinit();
 
@@ -2019,7 +2070,7 @@ test "std.hash_map repeat putAssumeCapacity/remove" {
     try expectEqual(map.unmanaged.count(), limit);
 }
 
-test "std.hash_map getOrPut" {
+test "getOrPut" {
     var map = AutoHashMap(u32, u32).init(std.testing.allocator);
     defer map.deinit();
 
@@ -2042,7 +2093,7 @@ test "std.hash_map getOrPut" {
     try expectEqual(sum, 30);
 }
 
-test "std.hash_map basic hash map usage" {
+test "basic hash map usage" {
     var map = AutoHashMap(i32, i32).init(std.testing.allocator);
     defer map.deinit();
 
@@ -2087,7 +2138,7 @@ test "std.hash_map basic hash map usage" {
     try testing.expect(map.remove(3) == true);
 }
 
-test "std.hash_map getOrPutAdapted" {
+test "getOrPutAdapted" {
     const AdaptedContext = struct {
         fn eql(self: @This(), adapted_key: []const u8, test_key: u64) bool {
             _ = self;
@@ -2136,7 +2187,7 @@ test "std.hash_map getOrPutAdapted" {
     }
 }
 
-test "std.hash_map ensureUnusedCapacity" {
+test "ensureUnusedCapacity" {
     var map = AutoHashMap(u64, u64).init(testing.allocator);
     defer map.deinit();
 
@@ -2149,7 +2200,7 @@ test "std.hash_map ensureUnusedCapacity" {
     try testing.expectEqual(capacity, map.capacity());
 }
 
-test "std.hash_map removeByPtr" {
+test "removeByPtr" {
     var map = AutoHashMap(i32, u64).init(testing.allocator);
     defer map.deinit();
 
@@ -2175,7 +2226,7 @@ test "std.hash_map removeByPtr" {
     try testing.expect(map.count() == 0);
 }
 
-test "std.hash_map removeByPtr 0 sized key" {
+test "removeByPtr 0 sized key" {
     var map = AutoHashMap(u0, u64).init(testing.allocator);
     defer map.deinit();
 
@@ -2193,7 +2244,7 @@ test "std.hash_map removeByPtr 0 sized key" {
     try testing.expect(map.count() == 0);
 }
 
-test "std.hash_map repeat fetchRemove" {
+test "repeat fetchRemove" {
     var map = AutoHashMapUnmanaged(u64, void){};
     defer map.deinit(testing.allocator);
 
@@ -2215,4 +2266,9 @@ test "std.hash_map repeat fetchRemove" {
     try testing.expect(map.get(1) != null);
     try testing.expect(map.get(2) != null);
     try testing.expect(map.get(3) != null);
+}
+
+test "getOrPut allocation failure" {
+    var map: std.StringHashMapUnmanaged(void) = .{};
+    try testing.expectError(error.OutOfMemory, map.getOrPut(std.testing.failing_allocator, "hello"));
 }

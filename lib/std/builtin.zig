@@ -1,3 +1,5 @@
+//! Types and values provided by the Zig language.
+
 const builtin = @import("builtin");
 
 /// `explicit_subsystem` is missing when the subsystem is automatically detected,
@@ -62,10 +64,10 @@ pub const StackTrace = struct {
 /// This data structure is used by the Zig language code generation and
 /// therefore must be kept in sync with the compiler implementation.
 pub const GlobalLinkage = enum {
-    Internal,
-    Strong,
-    Weak,
-    LinkOnce,
+    internal,
+    strong,
+    weak,
+    link_once,
 };
 
 /// This data structure is used by the Zig language code generation and
@@ -79,12 +81,12 @@ pub const SymbolVisibility = enum {
 /// This data structure is used by the Zig language code generation and
 /// therefore must be kept in sync with the compiler implementation.
 pub const AtomicOrder = enum {
-    Unordered,
-    Monotonic,
-    Acquire,
-    Release,
-    AcqRel,
-    SeqCst,
+    unordered,
+    monotonic,
+    acquire,
+    release,
+    acq_rel,
+    seq_cst,
 };
 
 /// This data structure is used by the Zig language code generation and
@@ -205,6 +207,9 @@ pub const CallingConvention = enum(u8) {
     Win64,
     /// AMD GPU, NVPTX, or SPIR-V kernel
     Kernel,
+    // Vulkan-only
+    Fragment,
+    Vertex,
 };
 
 /// This data structure is used by the Zig language code generation and
@@ -222,6 +227,9 @@ pub const AddressSpace = enum(u5) {
     param,
     shared,
     local,
+    input,
+    output,
+    uniform,
 
     // AVR address spaces.
     flash,
@@ -326,9 +334,9 @@ pub const Type = union(enum) {
     /// This data structure is used by the Zig language code generation and
     /// therefore must be kept in sync with the compiler implementation.
     pub const ContainerLayout = enum(u2) {
-        Auto,
-        Extern,
-        Packed,
+        auto,
+        @"extern",
+        @"packed",
     };
 
     /// This data structure is used by the Zig language code generation and
@@ -345,7 +353,7 @@ pub const Type = union(enum) {
     /// therefore must be kept in sync with the compiler implementation.
     pub const Struct = struct {
         layout: ContainerLayout,
-        /// Only valid if layout is .Packed
+        /// Only valid if layout is .@"packed"
         backing_integer: ?type = null,
         fields: []const StructField,
         decls: []const Declaration,
@@ -412,7 +420,6 @@ pub const Type = union(enum) {
     /// therefore must be kept in sync with the compiler implementation.
     pub const Fn = struct {
         calling_convention: CallingConvention,
-        alignment: comptime_int,
         is_generic: bool,
         is_var_args: bool,
         /// TODO change the language spec to make this not optional.
@@ -463,8 +470,8 @@ pub const Type = union(enum) {
 /// This data structure is used by the Zig language code generation and
 /// therefore must be kept in sync with the compiler implementation.
 pub const FloatMode = enum {
-    Strict,
-    Optimized,
+    strict,
+    optimized,
 };
 
 /// This data structure is used by the Zig language code generation and
@@ -492,8 +499,8 @@ pub const OutputMode = enum {
 /// This data structure is used by the Zig language code generation and
 /// therefore must be kept in sync with the compiler implementation.
 pub const LinkMode = enum {
-    Static,
-    Dynamic,
+    static,
+    dynamic,
 };
 
 /// This data structure is used by the Zig language code generation and
@@ -590,11 +597,11 @@ pub const VaListX86_64 = extern struct {
 pub const VaList = switch (builtin.cpu.arch) {
     .aarch64, .aarch64_be => switch (builtin.os.tag) {
         .windows => *u8,
-        .ios, .macos, .tvos, .watchos => *u8,
+        .ios, .macos, .tvos, .watchos, .visionos => *u8,
         else => @compileError("disabled due to miscompilations"), // VaListAarch64,
     },
     .arm => switch (builtin.os.tag) {
-        .ios, .macos, .tvos, .watchos => *u8,
+        .ios, .macos, .tvos, .watchos, .visionos => *u8,
         else => *anyopaque,
     },
     .amdgcn => *u8,
@@ -604,7 +611,7 @@ pub const VaList = switch (builtin.cpu.arch) {
     .mips, .mipsel, .mips64, .mips64el => *anyopaque,
     .riscv32, .riscv64 => *anyopaque,
     .powerpc, .powerpcle => switch (builtin.os.tag) {
-        .ios, .macos, .tvos, .watchos, .aix => *u8,
+        .ios, .macos, .tvos, .watchos, .visionos, .aix => *u8,
         else => VaListPowerPc,
     },
     .powerpc64, .powerpc64le => *u8,
@@ -651,7 +658,7 @@ pub const PrefetchOptions = struct {
 /// therefore must be kept in sync with the compiler implementation.
 pub const ExportOptions = struct {
     name: []const u8,
-    linkage: GlobalLinkage = .Strong,
+    linkage: GlobalLinkage = .strong,
     section: ?[]const u8 = null,
     visibility: SymbolVisibility = .default,
 };
@@ -661,7 +668,7 @@ pub const ExportOptions = struct {
 pub const ExternOptions = struct {
     name: []const u8,
     library_name: ?[]const u8 = null,
-    linkage: GlobalLinkage = .Strong,
+    linkage: GlobalLinkage = .strong,
     is_thread_local: bool = false,
 };
 
@@ -732,7 +739,6 @@ pub const CompilerBackend = enum(u64) {
 pub const TestFn = struct {
     name: []const u8,
     func: *const fn () anyerror!void,
-    async_frame_size: ?usize,
 };
 
 /// This function type is used by the Zig language code generation and
@@ -759,8 +765,7 @@ pub fn default_panic(msg: []const u8, error_return_trace: ?*StackTrace, ret_addr
         builtin.zig_backend == .stage2_arm or
         builtin.zig_backend == .stage2_aarch64 or
         builtin.zig_backend == .stage2_x86 or
-        (builtin.zig_backend == .stage2_x86_64 and builtin.target.ofmt != .elf) or
-        builtin.zig_backend == .stage2_riscv64 or
+        (builtin.zig_backend == .stage2_x86_64 and (builtin.target.ofmt != .elf and builtin.target.ofmt != .macho)) or
         builtin.zig_backend == .stage2_sparc64 or
         builtin.zig_backend == .stage2_spirv64)
     {
@@ -768,6 +773,19 @@ pub fn default_panic(msg: []const u8, error_return_trace: ?*StackTrace, ret_addr
             @breakpoint();
         }
     }
+
+    if (builtin.zig_backend == .stage2_riscv64) {
+        asm volatile ("ecall"
+            :
+            : [number] "{a7}" (64),
+              [arg1] "{a0}" (1),
+              [arg2] "{a1}" (@intFromPtr(msg.ptr)),
+              [arg3] "{a2}" (msg.len),
+            : "memory"
+        );
+        std.posix.exit(127);
+    }
+
     switch (builtin.os.tag) {
         .freestanding => {
             while (true) {
@@ -776,7 +794,7 @@ pub fn default_panic(msg: []const u8, error_return_trace: ?*StackTrace, ret_addr
         },
         .wasi => {
             std.debug.print("{s}", .{msg});
-            std.os.abort();
+            std.posix.abort();
         },
         .uefi => {
             const uefi = std.os.uefi;
@@ -824,9 +842,9 @@ pub fn default_panic(msg: []const u8, error_return_trace: ?*StackTrace, ret_addr
             }
 
             // Didn't have boot_services, just fallback to whatever.
-            std.os.abort();
+            std.posix.abort();
         },
-        .cuda, .amdhsa => std.os.abort(),
+        .cuda, .amdhsa => std.posix.abort(),
         .plan9 => {
             var status: [std.os.plan9.ERRMAX]u8 = undefined;
             const len = @min(msg.len, status.len - 1);

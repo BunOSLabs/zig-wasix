@@ -14,13 +14,14 @@ pub fn build(b: *std.Build) void {
 
     const main = b.addExecutable(.{
         .name = "main",
-        .root_source_file = .{ .path = "main.zig" },
+        .root_source_file = b.path("main.zig"),
         .target = b.host,
         .optimize = optimize,
     });
 
     const run = b.addRunArtifact(main);
     run.clearEnvironment();
+    run.disable_zig_progress = true;
 
     test_step.dependOn(&run.step);
 }

@@ -22,7 +22,7 @@ pub var base_allocator_instance = std.heap.FixedBufferAllocator.init("");
 pub var log_level = std.log.Level.warn;
 
 // Disable printing in tests for simple backends.
-pub const backend_can_print = builtin.zig_backend != .stage2_spirv64;
+pub const backend_can_print = !(builtin.zig_backend == .stage2_spirv64 or builtin.zig_backend == .stage2_riscv64);
 
 fn print(comptime fmt: []const u8, args: anytype) void {
     if (@inComptime()) {
@@ -210,18 +210,12 @@ test "expectEqual.union(enum)" {
 
 /// This function is intended to be used only in tests. When the formatted result of the template
 /// and its arguments does not equal the expected text, it prints diagnostics to stderr to show how
-/// they are not equal, then returns an error.
+/// they are not equal, then returns an error. It depends on `expectEqualStrings()` for printing
+/// diagnostics.
 pub fn expectFmt(expected: []const u8, comptime template: []const u8, args: anytype) !void {
-    const result = try std.fmt.allocPrint(allocator, template, args);
-    defer allocator.free(result);
-    if (std.mem.eql(u8, result, expected)) return;
-
-    print("\n====== expected this output: =========\n", .{});
-    print("{s}", .{expected});
-    print("\n======== instead found this: =========\n", .{});
-    print("{s}", .{result});
-    print("\n======================================\n", .{});
-    return error.TestExpectedFmt;
+    const actual = try std.fmt.allocPrint(allocator, template, args);
+    defer allocator.free(actual);
+    return expectEqualStrings(expected, actual);
 }
 
 /// This function is intended to be used only in tests. When the actual value is
@@ -248,7 +242,7 @@ fn expectApproxEqAbsInner(comptime T: type, expected: T, actual: T, tolerance: T
     }
 }
 
-test "expectApproxEqAbs" {
+test expectApproxEqAbs {
     inline for ([_]type{ f16, f32, f64, f128 }) |T| {
         const pos_x: T = 12.0;
         const pos_y: T = 12.06;
@@ -284,7 +278,7 @@ fn expectApproxEqRelInner(comptime T: type, expected: T, actual: T, tolerance: T
     }
 }
 
-test "expectApproxEqRel" {
+test expectApproxEqRel {
     inline for ([_]type{ f16, f32, f64, f128 }) |T| {
         const eps_value = comptime math.floatEps(T);
         const sqrt_eps_value = comptime @sqrt(eps_value);
@@ -569,11 +563,11 @@ pub fn tmpDir(opts: std.fs.Dir.OpenDirOptions) TmpDir {
     _ = std.fs.base64_encoder.encode(&sub_path, &random_bytes);
 
     const cwd = std.fs.cwd();
-    var cache_dir = cwd.makeOpenPath("zig-cache", .{}) catch
-        @panic("unable to make tmp dir for testing: unable to make and open zig-cache dir");
+    var cache_dir = cwd.makeOpenPath(".zig-cache", .{}) catch
+        @panic("unable to make tmp dir for testing: unable to make and open .zig-cache dir");
     defer cache_dir.close();
     const parent_dir = cache_dir.makeOpenPath("tmp", .{}) catch
-        @panic("unable to make tmp dir for testing: unable to make and open zig-cache/tmp dir");
+        @panic("unable to make tmp dir for testing: unable to make and open .zig-cache/tmp dir");
     const dir = parent_dir.makeOpenPath(&sub_path, opts) catch
         @panic("unable to make tmp dir for testing: unable to make and open the tmp dir");
 

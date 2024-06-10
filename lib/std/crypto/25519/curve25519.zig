@@ -102,6 +102,14 @@ pub const Curve25519 = struct {
     }
 
     /// Compute the Curve25519 equivalent to an Edwards25519 point.
+    ///
+    /// Note that the function doesn't check that the input point is
+    /// on the prime order group, e.g. that it is an Ed25519 public key
+    /// for which an Ed25519 secret key exists.
+    ///
+    /// If this is required, for example for compatibility with libsodium's strict
+    /// validation policy, the caller can call the `rejectUnexpectedSubgroup` function
+    /// on the input point before calling this function.
     pub fn fromEdwards25519(p: crypto.ecc.Edwards25519) IdentityElementError!Curve25519 {
         try p.clearCofactor().rejectIdentity();
         const one = crypto.ecc.Edwards25519.Fe.one;
@@ -137,7 +145,7 @@ test "non-affine edwards25519 to curve25519 projection" {
     try std.testing.expectEqualSlices(u8, &xp.toBytes(), &expected);
 }
 
-test "curve25519 small order check" {
+test "small order check" {
     var s: [32]u8 = [_]u8{1} ++ [_]u8{0} ** 31;
     const small_order_ss: [7][32]u8 = .{
         .{

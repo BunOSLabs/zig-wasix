@@ -54,7 +54,7 @@ pub fn parse(self: *Dylib, macho_file: *MachO, file: std.fs.File, fat_arch: ?fat
     const gpa = macho_file.base.comp.gpa;
     const offset = if (fat_arch) |ar| ar.offset else 0;
 
-    log.debug("parsing dylib from binary", .{});
+    log.debug("parsing dylib from binary: {s}", .{self.path});
 
     var header_buffer: [@sizeOf(macho.mach_header_64)]u8 = undefined;
     {
@@ -266,7 +266,7 @@ pub fn parseTbd(
 
     const gpa = macho_file.base.comp.gpa;
 
-    log.debug("parsing dylib from stub", .{});
+    log.debug("parsing dylib from stub: {s}", .{self.path});
 
     const umbrella_lib = lib_stub.inner[0];
 
@@ -520,7 +520,6 @@ pub fn resolveSymbols(self: *Dylib, macho_file: *MachO) void {
             global.nlist_idx = 0;
             global.file = self.index;
             global.flags.weak = flags.weak;
-            global.flags.weak_ref = false;
             global.flags.tlv = flags.tlv;
             global.flags.dyn_ref = false;
             global.flags.tentative = false;
@@ -534,9 +533,11 @@ pub fn resetGlobals(self: *Dylib, macho_file: *MachO) void {
         const sym = macho_file.getSymbol(sym_index);
         const name = sym.name;
         const global = sym.flags.global;
+        const weak_ref = sym.flags.weak_ref;
         sym.* = .{};
         sym.name = name;
         sym.flags.global = global;
+        sym.flags.weak_ref = weak_ref;
     }
 }
 
@@ -576,7 +577,7 @@ pub fn calcSymtabSize(self: *Dylib, macho_file: *MachO) !void {
     }
 }
 
-pub fn writeSymtab(self: Dylib, macho_file: *MachO) void {
+pub fn writeSymtab(self: Dylib, macho_file: *MachO, ctx: anytype) void {
     const tracy = trace(@src());
     defer tracy.end();
 
@@ -585,10 +586,10 @@ pub fn writeSymtab(self: Dylib, macho_file: *MachO) void {
         const file = global.getFile(macho_file) orelse continue;
         if (file.getIndex() != self.index) continue;
         const idx = global.getOutputSymtabIndex(macho_file) orelse continue;
-        const n_strx = @as(u32, @intCast(macho_file.strtab.items.len));
-        macho_file.strtab.appendSliceAssumeCapacity(global.getName(macho_file));
-        macho_file.strtab.appendAssumeCapacity(0);
-        const out_sym = &macho_file.symtab.items[idx];
+        const n_strx = @as(u32, @intCast(ctx.strtab.items.len));
+        ctx.strtab.appendSliceAssumeCapacity(global.getName(macho_file));
+        ctx.strtab.appendAssumeCapacity(0);
+        const out_sym = &ctx.symtab.items[idx];
         out_sym.n_strx = n_strx;
         global.setOutputSym(macho_file, out_sym);
     }
@@ -670,11 +671,20 @@ pub const TargetMatcher = struct {
         try self.target_strings.append(allocator, apple_string);
 
         switch (platform) {
-            .IOSSIMULATOR, .TVOSSIMULATOR, .WATCHOSSIMULATOR => {
+            .IOSSIMULATOR, .TVOSSIMULATOR, .WATCHOSSIMULATOR, .VISIONOSSIMULATOR => {
                 // For Apple simulator targets, linking gets tricky as we need to link against the simulator
                 // hosts dylibs too.
                 const host_target = try targetToAppleString(allocator, cpu_arch, .MACOS);
                 try self.target_strings.append(allocator, host_target);
+            },
+            .MACOS => {
+                // Turns out that around 10.13/10.14 macOS release version, Apple changed the target tags in
+                // tbd files from `macosx` to `macos`. In order to be compliant and therefore actually support
+                // linking on older platforms against `libSystem.tbd`, we add `<cpu_arch>-macosx` to target_strings.
+                const fallback_target = try std.fmt.allocPrint(allocator, "{s}-macosx", .{
+                    cpuArchToAppleString(cpu_arch),
+                });
+                try self.target_strings.append(allocator, fallback_target);
             },
             else => {},
         }
@@ -704,9 +714,11 @@ pub const TargetMatcher = struct {
             .IOS => "ios",
             .TVOS => "tvos",
             .WATCHOS => "watchos",
+            .VISIONOS => "xros",
             .IOSSIMULATOR => "ios-simulator",
             .TVOSSIMULATOR => "tvos-simulator",
             .WATCHOSSIMULATOR => "watchos-simulator",
+            .VISIONOSSIMULATOR => "xros-simulator",
             .BRIDGEOS => "bridgeos",
             .MACCATALYST => "maccatalyst",
             .DRIVERKIT => "driverkit",
@@ -741,8 +753,14 @@ pub const TargetMatcher = struct {
             .v3 => |v3| blk: {
                 var targets = std.ArrayList([]const u8).init(arena.allocator());
                 for (v3.archs) |arch| {
-                    const target = try std.fmt.allocPrint(arena.allocator(), "{s}-{s}", .{ arch, v3.platform });
-                    try targets.append(target);
+                    if (mem.eql(u8, v3.platform, "zippered")) {
+                        // From Xcode 10.3 → 11.3.1, macos SDK .tbd files specify platform as 'zippered'
+                        // which should map to [ '<arch>-macos', '<arch>-maccatalyst' ]
+                        try targets.append(try std.fmt.allocPrint(arena.allocator(), "{s}-macos", .{arch}));
+                        try targets.append(try std.fmt.allocPrint(arena.allocator(), "{s}-maccatalyst", .{arch}));
+                    } else {
+                        try targets.append(try std.fmt.allocPrint(arena.allocator(), "{s}-{s}", .{ arch, v3.platform }));
+                    }
                 }
                 break :blk targets.items;
             },
@@ -802,7 +820,7 @@ pub const Id = struct {
                 },
                 .float => |float| {
                     var buf: [256]u8 = undefined;
-                    break :blk try fmt.bufPrint(&buf, "{d:.2}", .{float});
+                    break :blk try fmt.bufPrint(&buf, "{d}", .{float});
                 },
                 .string => |string| {
                     break :blk string;

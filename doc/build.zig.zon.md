@@ -12,6 +12,14 @@ build.zig.
 
 String. Required.
 
+This is the default name used by packages depending on this one. For example,
+when a user runs `zig fetch --save <url>`, this field is used as the key in the
+`dependencies` table. Although the user can choose a different name, most users
+will stick with this provided value.
+
+It is redundant to include "zig" in this name because it is already within the
+Zig package namespace.
+
 ### `version`
 
 String. Required.
@@ -62,6 +70,13 @@ String.
 When this is provided, the package is found in a directory relative to the
 build root. In this case the package's hash is irrelevant and therefore not
 computed. This field and `url` are mutually exclusive.
+
+#### `lazy`
+
+Boolean.
+
+When this is set to `true`, a package is declared to be lazily fetched. This
+makes the dependency only get fetched if it is actually used.
 
 ### `paths`
 
